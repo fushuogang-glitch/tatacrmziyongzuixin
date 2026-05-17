@@ -32,6 +32,7 @@ class AdminUser(Base):
     password_hash = Column(String(255), nullable=False)
     real_name = Column(String(50))
     phone = Column(String(20))
-    role = Column(String(20), default="admin")                 # admin/operator
-    status = Column(String(20), default="active")
+    role = Column(String(20), default="admin")                 # super_admin/admin/consultant
+    status = Column(String(20), default="pending")             # pending/active/disabled
+    company = Column(String(100))
     created_at = Column(DateTime, server_default=func.now())

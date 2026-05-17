@@ -38,3 +38,17 @@ def notify_booking_confirmed(member_name: str, phone: str, consultant_name: str,
     """下店预约确认通知。"""
     text = f"✅ {member_name}，您的下店预约已确认：顾问 {consultant_name}，日期 {date_str}。"
     send_wecom(text, mentioned_mobiles=[phone])
+
+
+def notify_booking_applied(member_name: str, phone: str, preferred_date: str,
+                           city: str, duration: int) -> None:
+    """新下店预约提交 → 通知管理员。"""
+    text = (
+        f"📩 新下店预约\n"
+        f"学员：{member_name}（{phone[-4:]}）\n"
+        f"期望日期：{preferred_date}\n"
+        f"城市：{city or '未填'}\n"
+        f"时长：{duration}天\n"
+        f"请前往后台确认并分配老师。"
+    )
+    send_wecom(text)

@@ -24,6 +24,7 @@ CREATE TABLE IF NOT EXISTS members (
   referral_code   VARCHAR(20) UNIQUE,                        -- 专属推荐码
   referred_by     INTEGER REFERENCES members(id),            -- 推荐人 ID
   status          VARCHAR(20) DEFAULT 'active',              -- active / expired / frozen
+  openid          VARCHAR(64) UNIQUE,                        -- 微信小程序 openid（可空，兼容后台录入）
   created_at      TIMESTAMP DEFAULT NOW(),
   updated_at      TIMESTAMP DEFAULT NOW()
 );
@@ -31,6 +32,7 @@ CREATE TABLE IF NOT EXISTS members (
 CREATE INDEX IF NOT EXISTS idx_members_referred_by ON members(referred_by);
 CREATE INDEX IF NOT EXISTS idx_members_status      ON members(status);
 CREATE INDEX IF NOT EXISTS idx_members_member_type ON members(member_type);
+CREATE INDEX IF NOT EXISTS idx_members_openid      ON members(openid);
 
 -- updated_at 自动刷新触发器（members 表）
 CREATE OR REPLACE FUNCTION trg_set_updated_at() RETURNS trigger AS $$
@@ -213,5 +215,19 @@ CREATE TABLE IF NOT EXISTS handbooks (
 );
 
 CREATE INDEX IF NOT EXISTS idx_handbooks_session_id ON handbooks(session_id);
+
+-- ---------------------------------------------------------------------
+-- 附表：后台管理账号 admin_users（非 PRD 原表，后台登录必需）
+-- ---------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS admin_users (
+  id            SERIAL PRIMARY KEY,
+  username      VARCHAR(50) UNIQUE NOT NULL,
+  password_hash VARCHAR(255) NOT NULL,
+  real_name     VARCHAR(50),
+  phone         VARCHAR(20),
+  role          VARCHAR(20) DEFAULT 'admin',                -- admin / operator
+  status        VARCHAR(20) DEFAULT 'active',
+  created_at    TIMESTAMP DEFAULT NOW()
+);
 
 COMMIT;

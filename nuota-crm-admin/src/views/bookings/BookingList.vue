@@ -1,149 +1,133 @@
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue';
-import { ElMessage, ElMessageBox } from 'element-plus';
+import { onMounted, ref } from 'vue';
+import { ElMessage } from 'element-plus';
 import { API } from '../../api';
+import { useRouter } from 'vue-router';
+import { useUserStore } from '../../store/user';
 
-const status = ref('');
+const router = useRouter();
+const user = useUserStore();
+const status = ref('pending');
 const rows = ref<any[]>([]);
 const loading = ref(false);
-const consultants = ref<any[]>([]);
-
-const confirmDialog = reactive({ visible: false, bid: 0, form: { consultant_id: 0 as number | null, confirmed_date: '' } });
-const completeDialog = reactive({ visible: false, bid: 0, form: { member_rating: 5 as number | null } });
 
 async function load() {
   loading.value = true;
   try {
-    rows.value = (await API.bookingList(status.value || undefined) as any) || [];
+    const r: any = await API.serviceOrderList(status.value ? { status: status.value } : {});
+    rows.value = (r || []);
   } finally {
     loading.value = false;
   }
 }
 
-async function loadConsultants() {
-  consultants.value = (await API.consultantList() as any) || [];
+function statusLabel(s: string) {
+  const m: Record<string, string> = {
+    pending: '待确认', confirmed: '待老师接单', accepted: '老师已接单',
+    preparing: '执案准备', in_progress: '执案中', follow_up: '跟进中',
+    completed: '已完成', cancelled: '已取消'
+  };
+  return m[s] || s;
 }
 
-function openConfirm(row: any) {
-  confirmDialog.bid = row.id;
-  confirmDialog.form = { consultant_id: null, confirmed_date: row.preferred_date || '' };
-  confirmDialog.visible = true;
-}
-async function submitConfirm() {
-  if (!confirmDialog.form.consultant_id || !confirmDialog.form.confirmed_date) {
-    ElMessage.warning('请完整填写');
-    return;
-  }
-  await API.bookingConfirm(confirmDialog.bid, confirmDialog.form);
-  ElMessage.success('预约已确认');
-  confirmDialog.visible = false;
-  load();
+function statusType(s: string) {
+  if (s === 'pending') return 'warning';
+  if (s === 'confirmed') return 'info';
+  if (s === 'completed') return 'success';
+  if (s === 'cancelled') return 'danger';
+  if (s === 'in_progress') return '';
+  return 'info';
 }
 
-function openComplete(row: any) {
-  completeDialog.bid = row.id;
-  completeDialog.form = { member_rating: 5 };
-  completeDialog.visible = true;
-}
-async function submitComplete() {
-  await API.bookingComplete(completeDialog.bid, completeDialog.form);
-  ElMessage.success('已标记完成');
-  completeDialog.visible = false;
-  load();
-}
-
-async function cancel(row: any) {
-  await ElMessageBox.confirm(`取消预约 #${row.id}？权益将回退为可用。`, '提示', { type: 'warning' });
-  await API.bookingCancel(row.id);
-  ElMessage.success('已取消');
-  load();
-}
-
-function statusTag(s: string) {
-  return { pending: 'warning', confirmed: 'success', completed: 'info', cancelled: 'danger' }[s] || '';
+function goDetail(row: any) {
+  router.push(`/service-orders/${row.id}`);
 }
 
 function fmt(v: any) {
-  if (!v) return '-';
-  return String(v).replace('T', ' ').slice(0, 19);
+  if (!v) return '—';
+  return String(v).replace('T', ' ').slice(0, 16);
 }
 
-onMounted(async () => { await loadConsultants(); await load(); });
+const isTeacher = user.role === 'consultant';
+
+onMounted(load);
 </script>
 
 <template>
   <div>
     <el-card>
       <div class="toolbar">
-        <el-select v-model="status" placeholder="状态筛选" clearable style="width: 160px;" @change="load">
-          <el-option label="待确认" value="pending" />
-          <el-option label="已确认" value="confirmed" />
+        <el-select v-model="status" placeholder="状态筛选" clearable style="width: 180px;" @change="load">
+          <el-option label="全部" value="" />
+          <el-option label="待管理员确认" value="pending" />
+          <el-option label="待老师接单" value="confirmed" />
+          <el-option label="老师已接单" value="accepted" />
+          <el-option label="执案中" value="in_progress" />
           <el-option label="已完成" value="completed" />
-          <el-option label="已取消" value="cancelled" />
         </el-select>
         <el-button @click="load">刷新</el-button>
+        <div style="flex:1"></div>
+        <el-tag v-if="!isTeacher" type="info" effect="plain" style="font-size:12px;">
+          会员预约 → 管理员确认 → 老师接单 → 自动排期+工单
+        </el-tag>
+        <el-tag v-else type="warning" effect="plain" style="font-size:12px;">
+          分配给你的预约会显示在这里，请及时确认接单
+        </el-tag>
       </div>
+
       <el-table :data="rows" v-loading="loading" stripe style="margin-top: 16px;">
-        <el-table-column prop="id" label="ID" width="70" />
-        <el-table-column label="学员" min-width="180">
+        <el-table-column prop="id" label="#" width="60" />
+        <el-table-column label="会员" min-width="160">
           <template #default="{ row }">
-            {{ row.member?.name }} · {{ row.member?.phone }}
+            <div style="font-weight:500;">{{ row.member_name || '—' }}</div>
+            <div style="font-size:12px;color:#999;">{{ row.enterprise_name || '' }}</div>
           </template>
         </el-table-column>
-        <el-table-column prop="city" label="城市" width="100" />
-        <el-table-column prop="address" label="地址" min-width="180" />
-        <el-table-column prop="preferred_date" label="期望日期" width="120" />
-        <el-table-column prop="confirmed_date" label="确认日期" width="120" />
-        <el-table-column prop="consultant_id" label="顾问ID" width="90" />
-        <el-table-column prop="duration_days" label="天数" width="70" />
-        <el-table-column label="状态" width="100">
-          <template #default="{ row }"><el-tag :type="statusTag(row.status)">{{ row.status }}</el-tag></template>
+        <el-table-column label="服务项目" min-width="140">
+          <template #default="{ row }">{{ row.service_name || '—' }}</template>
         </el-table-column>
-        <el-table-column prop="member_rating" label="评分" width="70" />
-        <el-table-column label="申请时间" width="170">
-          <template #default="{ row }">{{ fmt(row.apply_time) }}</template>
-        </el-table-column>
-        <el-table-column label="操作" fixed="right" width="240">
+        <el-table-column label="老师" width="110">
           <template #default="{ row }">
-            <el-button link type="primary" v-if="row.status === 'pending'" @click="openConfirm(row)">确认+排顾问</el-button>
-            <el-button link type="success" v-if="row.status === 'confirmed'" @click="openComplete(row)">标记完成</el-button>
-            <el-button link type="danger" v-if="row.status !== 'completed' && row.status !== 'cancelled'" @click="cancel(row)">取消</el-button>
+            <span :style="{ color: row.consultant_name ? '#333' : '#e6a23c' }">
+              {{ row.consultant_name || '待分配' }}
+            </span>
+          </template>
+        </el-table-column>
+        <el-table-column label="预约日期" width="120">
+          <template #default="{ row }">{{ row.appoint_date || '—' }}</template>
+        </el-table-column>
+        <el-table-column label="门店" width="130">
+          <template #default="{ row }">{{ row.store_name || '—' }}</template>
+        </el-table-column>
+        <el-table-column label="状态" width="120">
+          <template #default="{ row }">
+            <el-tag :type="statusType(row.status)" size="small">{{ statusLabel(row.status) }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="提交时间" width="160">
+          <template #default="{ row }">{{ fmt(row.created_at) }}</template>
+        </el-table-column>
+        <el-table-column label="操作" fixed="right" width="140">
+          <template #default="{ row }">
+            <el-button v-if="row.status === 'pending' && !isTeacher" link type="primary" @click="goDetail(row)">
+              去确认
+            </el-button>
+            <el-button v-else-if="row.status === 'confirmed' && isTeacher" link type="warning" @click="goDetail(row)">
+              确认接单
+            </el-button>
+            <el-button v-else-if="row.status === 'confirmed' && !isTeacher" link type="info" @click="goDetail(row)">
+              等待老师接单
+            </el-button>
+            <el-button v-else link type="default" @click="goDetail(row)">
+              查看
+            </el-button>
           </template>
         </el-table-column>
       </el-table>
     </el-card>
-
-    <el-dialog v-model="confirmDialog.visible" title="确认预约" width="420px">
-      <el-form :model="confirmDialog.form" label-width="90px">
-        <el-form-item label="顾问" required>
-          <el-select v-model="confirmDialog.form.consultant_id" style="width: 100%;">
-            <el-option v-for="c in consultants" :key="c.id" :value="c.id" :label="`${c.name}（${c.phone || ''}）`" />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="确认日期" required>
-          <el-date-picker v-model="confirmDialog.form.confirmed_date" type="date" value-format="YYYY-MM-DD" style="width: 100%;" />
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button @click="confirmDialog.visible = false">取消</el-button>
-        <el-button type="primary" @click="submitConfirm">确认</el-button>
-      </template>
-    </el-dialog>
-
-    <el-dialog v-model="completeDialog.visible" title="标记完成" width="400px">
-      <el-form :model="completeDialog.form" label-width="90px">
-        <el-form-item label="学员评分">
-          <el-rate v-model="completeDialog.form.member_rating" :max="5" />
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button @click="completeDialog.visible = false">取消</el-button>
-        <el-button type="primary" @click="submitComplete">提交</el-button>
-      </template>
-    </el-dialog>
   </div>
 </template>
 
 <style scoped>
-.toolbar { display: flex; gap: 12px; }
+.toolbar { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
 </style>

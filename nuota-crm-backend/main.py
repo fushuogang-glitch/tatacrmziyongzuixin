@@ -1,7 +1,7 @@
 # 诺控·塔塔 CRM —— FastAPI 入口
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Depends
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -9,7 +9,8 @@ from loguru import logger
 from sqlalchemy import text
 
 from config import settings
-from database import engine, Base, SessionLocal
+from database import engine, Base, SessionLocal, get_db
+from sqlalchemy.orm import Session
 import models  # noqa: F401 —— 触发模型注册
 from models import AdminUser
 
@@ -27,6 +28,22 @@ from routers.bookings import (
 )
 from routers.handbooks import router as handbooks_router, admin_router as handbooks_admin_router
 from routers.admin import router as admin_router
+from routers.services import router as services_router, admin_router as services_admin_router
+from routers.agreements import router as agreements_router
+from routers.calendar import router as calendar_router, public_router as calendar_public_router
+from routers.consultant_auth import router as consultant_auth_router, admin_router as consultant_auth_admin_router
+from routers.notifications import router as notifications_router
+from routers.followup import router as followup_router
+from routers.enterprise import router as enterprise_router
+from routers.articles import router as articles_router, admin_router as articles_admin_router
+from routers.courses import router as courses_router, admin_router as courses_admin_router
+from routers.course_sessions import (
+    admin_router as cs_admin_router,
+    router as cs_router,
+    webhook_router as cs_webhook_router,
+)
+from routers.agents import router as agents_router
+from routers.webhook_events import router as webhook_events_router, admin_router as webhook_admin_router
 from utils.auth import hash_password
 
 
@@ -72,6 +89,29 @@ def _ensure_schema():
             conn.execute(text(s))
 
 
+import asyncio
+from datetime import datetime as _dt, time as _time
+
+
+async def _daily_debt_reminder_loop():
+    """每天 09:00 执行一次追款提醒。"""
+    while True:
+        now = _dt.now()
+        # 计算距下一个 09:00 的秒数
+        target = now.replace(hour=9, minute=0, second=0, microsecond=0)
+        if now >= target:
+            from datetime import timedelta
+            target = target + timedelta(days=1)
+        wait_sec = (target - now).total_seconds()
+        await asyncio.sleep(wait_sec)
+        try:
+            from tasks.debt_reminder import run as debt_run
+            debt_run()
+            logger.info("[debt_reminder] 每日追款提醒执行完毕")
+        except Exception as e:
+            logger.error(f"[debt_reminder] 定时任务异常: {e}")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # 启动：建表（与 sql/schema.sql 互补）+ 默认管理员
@@ -81,7 +121,10 @@ async def lifespan(app: FastAPI):
         _ensure_admin()
     except Exception as e:
         logger.warning(f"启动初始化告警：{e}")
+    # 启动每日追款提醒后台任务
+    task = asyncio.create_task(_daily_debt_reminder_loop())
     yield
+    task.cancel()
 
 
 app = FastAPI(
@@ -114,6 +157,43 @@ def health():
     return {"code": 0, "msg": "ok", "data": {"app": settings.APP_NAME, "env": settings.APP_ENV}}
 
 
+@app.post("/admin/migrate-consultant-v2", tags=["system"])
+def migrate_consultant_v2(db: Session = Depends(get_db)):
+    """一次性迁移：加顾问字段+新建两张表"""
+    from sqlalchemy import text
+    results = []
+    try:
+        db.execute(text("ALTER TABLE consultants ADD COLUMN IF NOT EXISTS service_modules TEXT"))
+        results.append("OK: service_modules")
+    except Exception as e:
+        results.append(f"SKIP service_modules: {e}")
+    try:
+        db.execute(text("ALTER TABLE consultants ADD COLUMN IF NOT EXISTS password_hash VARCHAR(128)"))
+        results.append("OK: password_hash")
+    except Exception as e:
+        results.append(f"SKIP password_hash: {e}")
+    db.execute(text("""
+        CREATE TABLE IF NOT EXISTS consultant_applications (
+            id SERIAL PRIMARY KEY, name VARCHAR(50) NOT NULL,
+            phone VARCHAR(20) NOT NULL UNIQUE, specialty VARCHAR(100), company VARCHAR(100),
+            service_modules TEXT, password_hash VARCHAR(128) NOT NULL,
+            status VARCHAR(20) DEFAULT 'pending', reviewed_by INTEGER,
+            review_note TEXT, reviewed_at TIMESTAMP, created_at TIMESTAMP DEFAULT NOW()
+        )
+    """))
+    results.append("OK: consultant_applications")
+    db.execute(text("""
+        CREATE TABLE IF NOT EXISTS consultant_invite_codes (
+            id SERIAL PRIMARY KEY, consultant_id INTEGER, code VARCHAR(32) UNIQUE NOT NULL,
+            used_count INTEGER DEFAULT 0, max_uses INTEGER DEFAULT 100,
+            is_active BOOLEAN DEFAULT TRUE, created_at TIMESTAMP DEFAULT NOW()
+        )
+    """))
+    results.append("OK: consultant_invite_codes")
+    db.commit()
+    return {"code": 0, "results": results}
+
+
 # ---- 学员端路由 ----
 app.include_router(auth_router)
 app.include_router(members_router)
@@ -124,6 +204,8 @@ app.include_router(referrals_router)
 app.include_router(rewards_router)
 app.include_router(bookings_router)
 app.include_router(handbooks_router)
+app.include_router(services_router)
+app.include_router(agreements_router)
 
 # ---- 管理端路由 ----
 app.include_router(auth_admin_router)
@@ -134,7 +216,25 @@ app.include_router(rewards_admin_router)
 app.include_router(bookings_admin_router)
 app.include_router(quota_router)
 app.include_router(handbooks_admin_router)
+app.include_router(services_admin_router)
 app.include_router(admin_router)
+app.include_router(calendar_router)
+app.include_router(calendar_public_router)
+app.include_router(consultant_auth_router)
+app.include_router(consultant_auth_admin_router)
+app.include_router(notifications_router)
+app.include_router(followup_router)
+app.include_router(enterprise_router)
+app.include_router(articles_router)
+app.include_router(articles_admin_router)
+app.include_router(courses_router)
+app.include_router(courses_admin_router)
+app.include_router(cs_admin_router)
+app.include_router(cs_router)
+app.include_router(cs_webhook_router)
+app.include_router(agents_router)
+app.include_router(webhook_events_router)
+app.include_router(webhook_admin_router)
 
 
 if __name__ == "__main__":

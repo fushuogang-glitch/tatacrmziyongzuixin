@@ -84,7 +84,7 @@ onMounted(load);
       </div>
 
       <el-alert type="info" :closable="false" style="margin-top: 24px;"
-        :title="`默认上限 = 活跃顾问数 × 6 = ${active.length} × 6 = ${active.length * 6}（可手动覆盖）`" />
+        :title="`默认上限 = 活跃老师数 × 6 = ${active.length} × 6 = ${active.length * 6}（可手动覆盖）`" />
     </el-card>
 
     <el-dialog v-model="setDialog.visible" title="设置月度上限" width="360px">

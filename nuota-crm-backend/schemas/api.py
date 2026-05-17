@@ -34,24 +34,49 @@ class MemberRegisterIn(BaseModel):
     name: str
     phone: str
     enterprise_name: Optional[str] = None
+    store_count: Optional[int] = 1
+    store_type: Optional[str] = None
+    pre_annual_revenue: Optional[float] = None
     city: Optional[str] = None
     role: Optional[str] = None
     member_type: Optional[str] = "trial"
-    referral_code: Optional[str] = None        # 绑定推荐关系
-    openid: Optional[str] = None               # 可选：小程序登录已拿到的 openid
+    referral_code: Optional[str] = None
+    invite_code: Optional[str] = None  # 企业邀请码
+    openid: Optional[str] = None
+    # 归属老师
+    consultant_id: Optional[int] = None
+    gender: Optional[str] = None
+    birthday: Optional[date] = None
+    history_course_count: Optional[int] = None
+    history_service_count: Optional[int] = None
+    history_referral_count: Optional[int] = None
+    # 首次缴费（新增学员时同步录入）
+    first_payment_amount: Optional[float] = None     # 付款金额
+    first_payment_debt: Optional[float] = None       # 欠款金额
+    first_payment_mode: Optional[str] = None         # full/installment
+    first_payment_method: Optional[str] = None       # company_account/private_account/wecom/wechat_proxy
+    first_payment_due_date: Optional[str] = None     # 补款截止日 YYYY-MM-DD
+    first_payment_remark: Optional[str] = None
 
 
 class MemberUpdateIn(BaseModel):
     name: Optional[str] = None
     enterprise_name: Optional[str] = None
+    store_count: Optional[int] = None
+    store_type: Optional[str] = None
+    pre_annual_revenue: Optional[float] = None
     city: Optional[str] = None
     role: Optional[str] = None
     member_type: Optional[str] = None
     enroll_date: Optional[date] = None
     expire_date: Optional[date] = None
     status: Optional[str] = None
-
-
+    consultant_id: Optional[int] = None
+    gender: Optional[str] = None
+    birthday: Optional[date] = None
+    history_course_count: Optional[int] = None
+    history_service_count: Optional[int] = None
+    history_referral_count: Optional[int] = None
 class MemberOut(BaseModel):
     id: int
     name: str
@@ -183,16 +208,26 @@ class HandbookSaveIn(BaseModel):
 # ========= 后台缴费 =========
 class PaymentCreateIn(BaseModel):
     member_id: int
+    consultant_id: Optional[int] = None          # 归属老师
     amount: float
-    pay_type: str = "annual"
+    debt_amount: Optional[float] = 0             # 欠款金额
+    pay_mode: Optional[str] = "full"             # full/installment
+    pay_method: Optional[str] = None             # company_account/private_account/wecom/wechat_proxy
+    pay_type: str = "annual"                     # annual/single
     pay_status: str = "paid"
+    due_date: Optional[str] = None               # 补款截止日 YYYY-MM-DD
     remark: Optional[str] = None
+    total_times: Optional[int] = None            # 服务次数（年费制默认6，单次制从服务取）
+    service_id: Optional[int] = None             # 合作项目ID
 
 
 # ========= 顾问 =========
 class ConsultantIn(BaseModel):
     name: str
     phone: Optional[str] = None
+    specialty: Optional[str] = None
+    company: Optional[str] = None
+    service_modules: Optional[str] = None
     monthly_days: int = 14
     course_days: int = 8
     status: str = "active"

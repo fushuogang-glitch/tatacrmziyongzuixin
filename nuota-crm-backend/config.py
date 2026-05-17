@@ -5,8 +5,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     """应用全局配置，读取 .env 文件。"""
 
-    # 数据库
-    DATABASE_URL: str = "postgresql://postgres:postgres@localhost:5432/nuota_crm"
+    # 数据库（psycopg v3 方言）
+    DATABASE_URL: str = "postgresql+psycopg://jiuyi@localhost:5432/nuota_crm"
 
     # Redis
     REDIS_URL: str = "redis://localhost:6379/0"

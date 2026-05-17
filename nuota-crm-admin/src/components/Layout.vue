@@ -1,54 +1,184 @@
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, ref, onMounted } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useUserStore } from '../store/user';
+import { API } from '../api';
+import NotifBell from './NotifBell.vue';
 
 const route = useRoute();
 const router = useRouter();
 const user = useUserStore();
 
-const menu = [
-  { path: '/dashboard', title: '数据看板', icon: 'DataLine' },
-  { path: '/members', title: '学员管理', icon: 'User' },
-  { path: '/sessions', title: '场次管理', icon: 'Calendar' },
-  { path: '/checkins', title: '签到管理', icon: 'Check' },
-  { path: '/referrals', title: '推荐管理', icon: 'Share' },
-  { path: '/rewards', title: '权益台账', icon: 'Present' },
-  { path: '/bookings', title: '下店预约', icon: 'Location' },
-  { path: '/consultants', title: '顾问管理', icon: 'Avatar' },
-  { path: '/quota', title: '名额管理', icon: 'PieChart' },
+const badges = ref<Record<string, number>>({});
+
+// 分组菜单
+const menuGroups = [
+  {
+    label: '总览', icon: 'Odometer',
+    items: [
+      { path: '/dashboard', title: '数据看板', icon: 'DataLine', adminOnly: true },
+      { path: '/calendar', title: '日历看板', icon: 'Calendar' },
+      { path: '/my-dashboard', title: '我的看板', icon: 'TrendCharts', consultantOnly: true },
+    ],
+  },
+  {
+    label: '教学服务', icon: 'Reading',
+    items: [
+      { path: '/course-sessions', title: '课程场次', icon: 'Calendar', adminOnly: true },
+      { path: '/services', title: '专案服务', icon: 'Briefcase', adminOnly: true },
+      { path: '/service-orders', title: '服务工单', icon: 'Document' },
+
+    ],
+  },
+  {
+    label: '会员运营', icon: 'UserFilled',
+    items: [
+      { path: '/members', title: '会员/学员', icon: 'User' },
+      { path: '/payments', title: '收款明细', icon: 'Money' },
+      { path: '/referrals', title: '推荐管理', icon: 'Share', adminOnly: true },
+      { path: '/rewards', title: '权益台账', icon: 'Present', adminOnly: true },
+      { path: '/quota', title: '名额管理', icon: 'PieChart', adminOnly: true },
+    ],
+  },
+  {
+    label: '内容运营', icon: 'Document',
+    items: [
+      { path: '/articles', title: '内容管理', icon: 'Notebook' },
+    ],
+  },
+  {
+    label: '下店执案', icon: 'MapLocation',
+    items: [
+      { path: '/schedules', title: '老师排期', icon: 'Calendar' },
+      { path: '/bookings', title: '预约管理', icon: 'Location' },
+    ],
+  },
+  {
+    label: '组织管理', icon: 'Management',
+    items: [
+      { path: '/branches', title: '分公司管理', icon: 'OfficeBuilding', adminOnly: true },
+      { path: '/consultants', title: '老师管理', icon: 'Avatar', adminOnly: true },
+      { path: '/consultant-approval', title: '老师审核', icon: 'CircleCheck', adminOnly: true },
+    ],
+  },
+  {
+    label: '系统设置', icon: 'Setting',
+    items: [
+      { path: '/users', title: '账号管理', icon: 'Setting', superOnly: true },
+      { path: '/operation-logs', title: '操作日志', icon: 'Document', superOnly: true },
+      { path: '/recycle-bin', title: '回收站', icon: 'Delete', superOnly: true },
+    ],
+  },
 ];
 
+// 展开所有平铺项用于路由匹配
+const allItems = menuGroups.flatMap(g => g.items);
+
 const active = computed(() => {
-  const hit = menu.find(m => route.path.startsWith(m.path));
+  const hit = allItems.find(m => route.path.startsWith(m.path));
   return hit?.path || '/dashboard';
+});
+
+// 过滤：权限不够的菜单不显示
+function filterItems(items: any[]) {
+  return items.filter(m => {
+    if (m.superOnly && user.role !== 'super_admin') return false;
+    if (m.adminOnly && user.role === 'consultant') return false;
+    if (m.consultantOnly && user.role !== 'consultant') return false;
+    return true;
+  });
+}
+
+// 过滤后有子项的分组才显示
+const visibleGroups = computed(() =>
+  menuGroups.map(g => ({ ...g, items: filterItems(g.items) })).filter(g => g.items.length > 0)
+);
+
+// 默认展开当前路由所在的分组
+const defaultOpeneds = computed(() => {
+  const idx = visibleGroups.value.findIndex(g => g.items.some(m => route.path.startsWith(m.path)));
+  return idx >= 0 ? [`group-${idx}`] : ['group-0'];
 });
 
 function handleLogout() {
   user.logout();
   router.push('/login');
 }
+
+// 角标路径映射
+const badgePathMap: Record<string, string> = {
+  '/bookings': 'bookings',
+  '/service-orders': 'service-orders',
+  '/schedules': 'schedules',
+};
+
+function getBadge(path: string): number {
+  const key = badgePathMap[path];
+  return key ? (badges.value[key] || 0) : 0;
+}
+
+function getGroupBadge(items: any[]): number {
+  return items.reduce((sum: number, m: any) => sum + getBadge(m.path), 0);
+}
+
+async function loadBadges() {
+  try {
+    const r: any = await API.menuBadges();
+    badges.value = r?.data || r || {};
+  } catch { badges.value = {}; }
+}
+
+onMounted(() => {
+  loadBadges();
+  setInterval(loadBadges, 30000); // 每30秒刷新
+});
 </script>
 
 <template>
   <el-container style="height: 100vh;">
     <el-aside width="220px" class="aside">
       <div class="logo">
-        <span class="logo-main">诺控·塔塔</span>
-        <span class="logo-sub">CRM 管理后台</span>
+        <span class="logo-main">TATA CONSULTING®</span>
+        <span class="logo-sub">塔塔咨询 CRM</span>
       </div>
-      <el-menu :default-active="active" router class="menu">
-        <el-menu-item v-for="m in menu" :key="m.path" :index="m.path">
-          <el-icon><component :is="m.icon" /></el-icon>
-          <template #title>{{ m.title }}</template>
-        </el-menu-item>
+      <el-menu :default-active="active" :default-openeds="defaultOpeneds" router class="menu" :unique-opened="false">
+        <template v-for="(g, gi) in visibleGroups" :key="gi">
+          <!-- 分组只有1项时直接平铺 -->
+          <el-menu-item v-if="g.items.length === 1" :index="g.items[0].path">
+            <el-icon><component :is="g.items[0].icon" /></el-icon>
+            <template #title>
+              <span style="flex:1">{{ g.items[0].title }}</span>
+              <span v-if="getBadge(g.items[0].path) > 0" class="menu-num">{{ getBadge(g.items[0].path) > 99 ? '99+' : getBadge(g.items[0].path) }}</span>
+            </template>
+          </el-menu-item>
+          <!-- 多项时折叠 -->
+          <el-sub-menu v-else :index="`group-${gi}`">
+            <template #title>
+              <el-icon><component :is="g.icon" /></el-icon>
+              <span style="flex:1">{{ g.label }}</span>
+              <span v-if="getGroupBadge(g.items) > 0" class="menu-num">{{ getGroupBadge(g.items) > 99 ? '99+' : getGroupBadge(g.items) }}</span>
+            </template>
+            <el-menu-item v-for="m in g.items" :key="m.path" :index="m.path">
+              <el-icon><component :is="m.icon" /></el-icon>
+              <template #title>
+                <span style="flex:1">{{ m.title }}</span>
+                <span v-if="getBadge(m.path) > 0" class="menu-num">{{ getBadge(m.path) > 99 ? '99+' : getBadge(m.path) }}</span>
+              </template>
+            </el-menu-item>
+          </el-sub-menu>
+        </template>
       </el-menu>
     </el-aside>
     <el-container>
       <el-header class="header">
         <div class="title">{{ route.meta?.title }}</div>
         <div class="user">
-          <span>{{ user.realName || user.username || '管理员' }}</span>
+          <NotifBell v-if="user.role !== 'consultant'" />
+          <span style="margin-left:12px">{{ user.realName || user.username || '管理员' }}</span>
+          <el-tag size="small" style="margin-left:6px"
+            :type="user.role === 'super_admin' ? 'danger' : user.role === 'consultant' ? 'success' : 'warning'">
+            {{ user.role === 'super_admin' ? '超级管理员' : user.role === 'consultant' ? '老师' : '管理员' }}
+          </el-tag>
           <el-dropdown @command="handleLogout">
             <el-icon style="margin-left: 8px;"><ArrowDown /></el-icon>
             <template #dropdown>
@@ -69,7 +199,7 @@ function handleLogout() {
 </template>
 
 <style scoped>
-.aside { background: #1f2d3d; color: #fff; }
+.aside { background: #1f2d3d; color: #fff; overflow-y: auto; }
 .logo { padding: 24px 20px; border-bottom: 1px solid #2d3e52; }
 .logo-main { display: block; font-size: 18px; font-weight: 700; letter-spacing: 2px; color: #fff; }
 .logo-sub { display: block; margin-top: 4px; font-size: 12px; color: #8ea0b5; }
@@ -77,8 +207,13 @@ function handleLogout() {
 .menu :deep(.el-menu-item) { color: #c0ccda; }
 .menu :deep(.el-menu-item.is-active) { background: #409EFF !important; color: #fff; }
 .menu :deep(.el-menu-item:hover) { background: #2d3e52; }
+.menu :deep(.el-sub-menu__title) { color: #c0ccda; }
+.menu :deep(.el-sub-menu__title:hover) { background: #2d3e52; }
+.menu :deep(.el-sub-menu .el-menu) { background: #1a2738; }
+.menu :deep(.el-sub-menu .el-menu-item) { padding-left: 48px !important; font-size: 13px; }
 .header { display: flex; justify-content: space-between; align-items: center; background: #fff; border-bottom: 1px solid #ebeef5; }
 .title { font-size: 16px; font-weight: 600; }
 .user { color: #606266; font-size: 14px; cursor: pointer; }
 .main { padding: 20px; background: #f5f7fa; }
+.menu-num { display: inline-flex; align-items: center; justify-content: center; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 10px; background: #f56c6c; color: #fff; font-size: 11px; font-weight: 500; line-height: 1; margin-left: 6px; }
 </style>
