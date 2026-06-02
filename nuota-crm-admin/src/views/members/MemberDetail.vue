@@ -5,6 +5,7 @@ import { ElMessage, ElMessageBox } from 'element-plus';
 import { API } from '../../api';
 import { useUserStore } from '../../store/user';
 import MemberRechargeBlock from './MemberRechargeBlock.vue';
+import MemberDeepAnalysisBlock from './MemberDeepAnalysisBlock.vue';
 
 const route = useRoute();
 const router = useRouter();
@@ -298,6 +299,9 @@ onMounted(() => {
 
     <!-- 储值 -->
     <MemberRechargeBlock :member-id="id" style="margin-bottom: 16px;" />
+
+    <!-- 🔮 会员深度分析 -->
+    <MemberDeepAnalysisBlock :member-id="id" />
 
     <!-- 客户跟进记录 -->
     <el-card v-loading="fuLoading">

@@ -208,4 +208,16 @@ export const API = {
   rechargeCreate: (body: any) => http.post('/admin/recharges', body),
   rechargeConsume: (id: number, body: any) => http.post(`/admin/recharges/${id}/consume`, body),
   rechargeConsumptions: (id: number) => http.get(`/admin/recharges/${id}/consumptions`),
+
+  // 会员深度分析（塔才回写）
+  memberDeepAnalysis: (memberId: number) => http.get(`/admin/members/${memberId}/deep-analysis`),
+  memberDeepAnalysisSubmit: (memberId: number, body: { raw_text: string; raw_images?: string[] }) =>
+    http.post(`/admin/members/${memberId}/deep-analysis`, body),
+
+  // 老师人才模型分析
+  talentAnalysisList: (params?: any) => http.get('/admin/talent-analysis', { params: params || {} }),
+  consultantTalentAnalysis: (consultantId: number) =>
+    http.get(`/admin/consultants/${consultantId}/talent-analysis`),
+  consultantTalentAnalysisSubmit: (consultantId: number, body: { raw_text: string; raw_images?: string[] }) =>
+    http.post(`/admin/consultants/${consultantId}/talent-analysis`, body),
 };
