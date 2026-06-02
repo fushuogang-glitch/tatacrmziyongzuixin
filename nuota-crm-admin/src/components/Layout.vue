@@ -61,6 +61,7 @@ const menuGroups = [
       { path: '/consultant-approval', title: '老师审核', icon: 'CircleCheck', adminOnly: true },
       { path: '/salary', title: '工资管理', icon: 'Money', adminOnly: true },
       { path: '/promotion', title: '晋级管理', icon: 'TrendCharts', adminOnly: true },
+      { path: '/talent-analysis', title: '老师人才分析', icon: 'MagicStick', adminOnly: true },
     ],
   },
   {
