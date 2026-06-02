@@ -10,12 +10,15 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from database import get_db
-from utils.auth import get_current_admin_or_consultant
+from utils.auth import get_current_member,  get_current_admin_or_consultant
 from utils.helpers import ok
 from models import (
     Service, ServicePackage, ServiceOrder, ServiceWorkLog,
     Member, Consultant, Payment
 )
+from models.booking import ConsultantSchedule
+
+
 
 
 # ══════════════════ Schemas ══════════════════
@@ -27,6 +30,7 @@ class ServiceOut(BaseModel):
     category: Optional[str] = None
     brand: Optional[str] = "塔塔"
     description: Optional[str] = None
+    introduction: Optional[str] = None
     service_mode: Optional[str] = "annual"
     total_times: Optional[int] = 5
     visit_days: Optional[int] = 2
@@ -44,6 +48,7 @@ class ServiceCreate(BaseModel):
     category: Optional[str] = None
     brand: Optional[str] = "塔塔"
     description: Optional[str] = None
+    introduction: Optional[str] = None
     service_mode: Optional[str] = "annual"
     total_times: Optional[int] = 5
     duration_days: Optional[int] = 2
@@ -57,7 +62,6 @@ class PackageOut(BaseModel):
     package_no: Optional[str] = None
     total_times: int
     used_times: int
-    amount: Optional[float] = None
     start_date: Optional[date] = None
     expire_date: Optional[date] = None
     status: str
@@ -65,9 +69,9 @@ class PackageOut(BaseModel):
         from_attributes = True
 
 class OrderCreate(BaseModel):
-    member_id: int
+    member_id: Optional[int] = None
     service_id: int
-    appoint_date: date
+    appoint_date: Optional[date] = None
     appoint_time: str
     store_name: Optional[str] = None
     store_address: Optional[str] = None
@@ -86,7 +90,8 @@ class OrderOut(BaseModel):
     appoint_time: Optional[str] = None
     status: str
     workflow_stage: Optional[str] = None
-    workflow_progress: int = 0
+    workflow_progress: Optional[int] = 0
+    package_id: Optional[int] = None
     rating: Optional[int] = None
     # 关联名称（手动填充）
     service_name: Optional[str] = None
@@ -223,7 +228,9 @@ def list_services(category: Optional[str] = None, db: Session = Depends(get_db))
 
 
 @router.get("/grouped")
-def grouped_services(member_id: int, category: Optional[str] = None, db: Session = Depends(get_db)):
+def grouped_services(category: Optional[str] = None, member_id: Optional[int] = None, db: Session = Depends(get_db), current: Member = Depends(get_current_member)):
+    if not member_id:
+        member_id = current.id
     """按已合作/未合作分组返回服务列表"""
     q = db.query(Service).filter(Service.status == "active")
     if category:
@@ -255,7 +262,7 @@ def grouped_services(member_id: int, category: Optional[str] = None, db: Session
 
     return ok({"contracted": contracted, "available": available})
 
-def _enrich_order(o, db):
+def _enrich_order(o, db, admin=False):
     """给工单填充关联名称"""
     d = OrderOut.from_orm(o).dict()
     if o.service_id:
@@ -270,6 +277,12 @@ def _enrich_order(o, db):
         m = db.query(Member).filter(Member.id == o.member_id).first()
         if m:
             d['member_name'] = m.name
+    if o.package_id and admin:
+        pkg = db.query(ServicePackage).filter(ServicePackage.id == o.package_id).first()
+        if pkg:
+            d['package_no'] = pkg.package_no
+            d['visit_number'] = (pkg.used_times or 0) + 1  # 第几期
+            d['total_times'] = pkg.total_times
     return d
 
 @router.get("/{service_id}")
@@ -280,24 +293,44 @@ def get_service(service_id: int, db: Session = Depends(get_db)):
     return ok(ServiceOut.from_orm(s).dict())
 
 @router.get("/packages/my")
-def my_packages(member_id: int, db: Session = Depends(get_db)):
+def my_packages(member_id: Optional[int] = None, db: Session = Depends(get_db), current: Member = Depends(get_current_member)):
+    if not member_id:
+        member_id = current.id
     items = db.query(ServicePackage).filter(
         ServicePackage.member_id == member_id,
         ServicePackage.status == "active"
     ).all()
-    return ok([PackageOut.from_orm(p).dict() for p in items])
+    result = []
+    for p in items:
+        d = PackageOut.from_orm(p).dict()
+        result.append(d)
+    return ok(result)
 
 @router.post("/orders")
-def create_order(body: OrderCreate, db: Session = Depends(get_db)):
+def create_order(body: OrderCreate, current: Member = Depends(get_current_member), db: Session = Depends(get_db)):
     """会员预约专案服务 → 生成工单"""
-    member = db.query(Member).filter(Member.id == body.member_id).first()
+    mid = body.member_id or current.id
+    member = db.query(Member).filter(Member.id == mid).first()
     if not member:
         raise HTTPException(404, "会员不存在")
-    if not member.agreement_signed:
-        raise HTTPException(400, "请先完成协议签约")
+
+    # ── 客户冲突检测：同一日期不能约两个不同老师 ──
+    if body.appoint_date and body.consultant_id:
+        existing = (
+            db.query(ServiceOrder)
+            .filter(
+                ServiceOrder.member_id == mid,
+                ServiceOrder.appoint_date == body.appoint_date,
+                ServiceOrder.consultant_id != body.consultant_id,
+                ServiceOrder.status.notin_(["cancelled", "completed"]),
+            )
+            .first()
+        )
+        if existing:
+            raise HTTPException(400, f"该日期已有其他老师的服务安排（工单#{existing.id}），不可同时预约")
 
     pkg = db.query(ServicePackage).filter(
-        ServicePackage.member_id == body.member_id,
+        ServicePackage.member_id == mid,
         ServicePackage.status == "active",
         ServicePackage.used_times < ServicePackage.total_times,
     ).first()
@@ -306,10 +339,10 @@ def create_order(body: OrderCreate, db: Session = Depends(get_db)):
     if not service:
         raise HTTPException(404, "服务不存在")
 
-    order_no = f"SO-{datetime.now().strftime('%Y%m%d')}-{datetime.now().strftime('%H%M%S')}"
+    import random; order_no = f"SO-{datetime.now().strftime('%Y%m%d')}-{datetime.now().strftime('%H%M%S')}-{random.randint(100,999)}"
     order = ServiceOrder(
         order_no=order_no,
-        member_id=body.member_id,
+        member_id=mid,
         service_id=body.service_id,
         package_id=pkg.id if pkg else None,
         consultant_id=body.consultant_id,
@@ -326,6 +359,7 @@ def create_order(body: OrderCreate, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(order)
 
+    # 排期在管理员确认(workflow_confirm)后才写入，此处仅通知
     if body.consultant_id:
         from routers.notifications import push_notification
         from models.booking import Consultant
@@ -341,7 +375,9 @@ def create_order(body: OrderCreate, db: Session = Depends(get_db)):
     return ok(_enrich_order(order, db))
 
 @router.get("/orders/my")
-def my_orders(member_id: int, status: Optional[str] = None, db: Session = Depends(get_db)):
+def my_orders(member_id: Optional[int] = None, status: Optional[str] = None, db: Session = Depends(get_db), current: Member = Depends(get_current_member)):
+    if not member_id:
+        member_id = current.id
     q = db.query(ServiceOrder).filter(ServiceOrder.member_id == member_id)
     if status:
         q = q.filter(ServiceOrder.status == status)
@@ -366,8 +402,81 @@ def submit_rating(order_id: int, body: RatingSubmit, db: Session = Depends(get_d
     o.rating = body.rating
     o.rating_comment = body.comment
     o.rated_at = datetime.now()
+    # 同步到消耗明细
+    from models.consumption import PackageConsumption
+    cons = db.query(PackageConsumption).filter(PackageConsumption.order_id == order_id).first()
+    if cons:
+        cons.rating = body.rating
+        cons.rating_comment = body.comment
     db.commit()
     return {"code": 0, "msg": "评价成功"}
+
+
+# ── 小程序端：查看工单执案日志（只读） ──
+@router.get("/orders/{order_id}/logs")
+def order_logs(order_id: int, db: Session = Depends(get_db)):
+    """客户查看工单执案日志（老师填写的日志实时同步到小程序）"""
+    o = db.query(ServiceOrder).filter(ServiceOrder.id == order_id).first()
+    if not o:
+        raise HTTPException(404, "工单不存在")
+    logs = (
+        db.query(ServiceWorkLog)
+        .filter(ServiceWorkLog.order_id == order_id)
+        .order_by(ServiceWorkLog.created_at.desc())
+        .all()
+    )
+    result = []
+    for log in logs:
+        result.append({
+            "id": log.id,
+            "stage": log.stage,
+            "content": log.content,
+            "log_type": log.log_type,
+            "day_number": log.day_number,
+            "findings": log.findings,
+            "decisions": log.decisions,
+            "next_actions": log.next_actions,
+            "images": log.images,
+            "created_at": str(log.created_at) if log.created_at else "",
+            "author": "",
+        })
+    return ok(result)
+
+# ── 小程序端：查看工单详细进度（工作流状态） ──
+@router.get("/orders/{order_id}/progress")
+def order_progress(order_id: int, db: Session = Depends(get_db)):
+    """客户查看工单实时进度（排期确认/老师接单/执案中/跟进/完成）"""
+    o = db.query(ServiceOrder).filter(ServiceOrder.id == order_id).first()
+    if not o:
+        raise HTTPException(404, "工单不存在")
+    service = db.query(Service).filter(Service.id == o.service_id).first() if o.service_id else None
+    consultant = db.query(Consultant).filter(Consultant.id == o.consultant_id).first() if o.consultant_id else None
+    from datetime import timedelta
+    days = service.duration_days if service and service.duration_days else 1
+    steps = [
+        {"key": "pending", "label": "提交预约", "done": True},
+        {"key": "confirmed", "label": "排期已确认", "done": o.status not in ("pending",)},
+        {"key": "accepted", "label": "老师已接单", "done": o.status not in ("pending", "confirmed")},
+        {"key": "preparing", "label": "执案准备", "done": o.status in ("preparing", "in_progress", "follow_up", "completed")},
+        {"key": "in_progress", "label": "执案中", "done": o.status in ("in_progress", "follow_up", "completed")},
+        {"key": "follow_up", "label": "跟进回访", "done": o.status in ("follow_up", "completed")},
+        {"key": "completed", "label": "服务完成", "done": o.status == "completed"},
+    ]
+    return ok({
+        "order_id": o.id,
+        "order_no": o.order_no,
+        "status": o.status,
+        "workflow_stage": o.workflow_stage or "",
+        "workflow_progress": o.workflow_progress or 0,
+        "service_name": service.name if service else "",
+        "consultant_name": consultant.name if consultant else "",
+        "date_start": str(o.appoint_date) if o.appoint_date else "",
+        "date_end": str(o.appoint_date + timedelta(days=days-1)) if o.appoint_date else "",
+        "days": days,
+        "store_name": o.store_name or "",
+        "rating": o.rating,
+        "steps": steps,
+    })
 
 
 # ══════════════════ 管理端路由 ══════════════════
@@ -380,6 +489,16 @@ def admin_list_services(db: Session = Depends(get_db)):
 
 @admin_router.post("", response_model=ServiceOut)
 def admin_create_service(body: ServiceCreate, db: Session = Depends(get_db)):
+    # 编码重复检查
+    if body.code:
+        exist = db.query(Service).filter(Service.code == body.code).first()
+        if exist:
+            raise HTTPException(400, f"编码 {body.code} 已存在，请换一个编码")
+    else:
+        # 自动生成编码
+        last = db.query(Service).order_by(Service.id.desc()).first()
+        next_num = (last.id + 1) if last else 1
+        body.code = f"SV-{next_num:03d}"
     s = Service(**body.dict())
     db.add(s)
     db.commit()
@@ -439,7 +558,7 @@ def admin_toggle_service(service_id: int, db: Session = Depends(get_db)):
     label = "下架" if s.status == "offline" else "上架"
     return {"code": 0, "msg": f"已{label}", "status": s.status}
 
-@admin_router.get("/orders", response_model=List[OrderOut])
+@admin_router.get("/orders")
 def admin_list_orders(
     status: Optional[str] = None,
     consultant_id: Optional[int] = None,
@@ -453,7 +572,8 @@ def admin_list_orders(
         q = q.filter(ServiceOrder.consultant_id == consultant_id)
     if status:
         q = q.filter(ServiceOrder.status == status)
-    return q.order_by(ServiceOrder.created_at.desc()).limit(100).all()
+    items = q.order_by(ServiceOrder.created_at.desc()).limit(100).all()
+    return ok([_enrich_order(o, db, admin=True) for o in items])
 
 @admin_router.put("/orders/{order_id}", response_model=OrderOut)
 def admin_update_order(order_id: int, body: OrderUpdate, db: Session = Depends(get_db)):
@@ -466,6 +586,39 @@ def admin_update_order(order_id: int, body: OrderUpdate, db: Session = Depends(g
         pkg = db.query(ServicePackage).filter(ServicePackage.id == o.package_id).first()
         if pkg and pkg.used_times < pkg.total_times:
             pkg.used_times += 1
+            # 写入消耗明细
+            svc = db.query(Service).filter(Service.id == o.service_id).first() if o.service_id else None
+            consultant = db.query(Consultant).filter(Consultant.id == o.consultant_id).first() if o.consultant_id else None
+            assistant = db.query(Consultant).filter(Consultant.id == o.assistant_id).first() if o.assistant_id else None
+            last_log = db.query(ServiceWorkLog).filter(
+                ServiceWorkLog.order_id == o.id,
+                ServiceWorkLog.log_type.in_(['daily', 'report', 'note'])
+            ).order_by(ServiceWorkLog.id.desc()).first()
+            per_fee = float(pkg.per_time_fee) if pkg.per_time_fee else (
+                round(float(pkg.amount) / pkg.total_times, 2) if pkg.total_times and pkg.amount else 0
+            )
+            from models.consumption import PackageConsumption
+            consumption = PackageConsumption(
+                package_id=pkg.id, order_id=o.id, member_id=o.member_id,
+                consultant_id=o.consultant_id, visit_number=pkg.used_times,
+                service_name=svc.name if svc else '',
+                service_category=svc.category if svc else '',
+                deducted_amount=per_fee,
+                duration_days=svc.duration_days if svc else 0,
+                appoint_date=o.appoint_date, store_name=o.store_name,
+                consultant_name=consultant.name if consultant else '',
+                assistant_name=assistant.name if assistant else '',
+                rating=o.rating, rating_comment=o.rating_comment,
+                summary=last_log.content if last_log else '',
+                status='completed',
+            )
+            db.add(consumption)
+    # 如果改了日期/老师，同步排期
+    if body.appoint_date or body.consultant_id:
+        _sync_order_schedules(db, o)
+    # 如果取消，删排期
+    if body.status == "cancelled":
+        db.query(ConsultantSchedule).filter(ConsultantSchedule.order_id == o.id).delete()
     db.commit()
     db.refresh(o)
     return o
@@ -501,21 +654,104 @@ def admin_list_work_logs(order_id: int, db: Session = Depends(get_db)):
         } for l in logs
     ]}
 
+
+@admin_router.get("/packages")
+def admin_list_packages(member_id: int = None, db: Session = Depends(get_db)):
+    q = db.query(ServicePackage)
+    if member_id:
+        q = q.filter(ServicePackage.member_id == member_id)
+    items = q.order_by(ServicePackage.id.desc()).all()
+    
+    # Enrich with member name
+    member_ids = list({p.member_id for p in items})
+    members_map = {m.id: m for m in db.query(Member).filter(Member.id.in_(member_ids)).all()} if member_ids else {}
+    
+    result = []
+    for p in items:
+        m = members_map.get(p.member_id)
+        d = {
+            "id": p.id, "member_id": p.member_id,
+            "member_name": m.name if m else "",
+            "package_no": p.package_no, "total_times": p.total_times,
+            "used_times": p.used_times or 0,
+            "remaining_times": (p.total_times or 0) - (p.used_times or 0),
+            "amount": float(p.amount) if p.amount else 0,
+            "per_time_fee": float(p.per_time_fee) if p.per_time_fee else (round(float(p.amount) / p.total_times, 2) if p.total_times and p.amount else 0),
+            "pay_type": getattr(p, 'pay_type', None) or 'annual',
+            "start_date": p.start_date.isoformat() if p.start_date else None,
+            "expire_date": p.expire_date.isoformat() if p.expire_date else None,
+            "status": p.status,
+            "remark": p.remark,
+            "created_at": p.created_at.isoformat() if p.created_at else None,
+        }
+        result.append(d)
+    return {"code": 0, "data": result}
+
 @admin_router.post("/packages")
 def admin_create_package(
     member_id: int, total_times: int, amount: Decimal,
     start_date: date, expire_date: date, db: Session = Depends(get_db),
 ):
     pkg_no = f"PKG-{datetime.now().strftime('%Y%m%d%H%M%S')}"
+    per_fee = round(float(amount) / total_times, 2) if total_times > 0 else 0
     pkg = ServicePackage(
         member_id=member_id, package_no=pkg_no,
         total_times=total_times, amount=amount,
+        per_time_fee=per_fee, pay_type="annual",
         start_date=start_date, expire_date=expire_date, status="active",
     )
     db.add(pkg)
     db.commit()
     db.refresh(pkg)
     return {"code": 0, "msg": "套餐开通成功", "data": {"id": pkg.id, "package_no": pkg_no}}
+
+
+
+# ────────── 消耗明细 ──────────
+
+@admin_router.get("/consumptions")
+def admin_list_consumptions(
+    member_id: int = None, package_id: int = None,
+    db: Session = Depends(get_db),
+):
+    """CRM查看消耗明细——每次工单完成自动记录"""
+    from models.consumption import PackageConsumption
+    q = db.query(PackageConsumption)
+    if member_id:
+        q = q.filter(PackageConsumption.member_id == member_id)
+    if package_id:
+        q = q.filter(PackageConsumption.package_id == package_id)
+    items = q.order_by(PackageConsumption.id.desc()).all()
+
+    member_ids = list({c.member_id for c in items if c.member_id})
+    members_map = {m.id: m for m in db.query(Member).filter(Member.id.in_(member_ids)).all()} if member_ids else {}
+
+    result = []
+    for c in items:
+        m = members_map.get(c.member_id)
+        result.append({
+            "id": c.id,
+            "package_id": c.package_id,
+            "order_id": c.order_id,
+            "member_id": c.member_id,
+            "member_name": m.name if m else "",
+            "enterprise_name": getattr(m, 'enterprise_name', '') if m else "",
+            "visit_number": c.visit_number,
+            "service_name": c.service_name,
+            "service_category": c.service_category,
+            "deducted_amount": float(c.deducted_amount) if c.deducted_amount else 0,
+            "duration_days": c.duration_days,
+            "appoint_date": c.appoint_date.isoformat() if c.appoint_date else None,
+            "store_name": c.store_name,
+            "consultant_name": c.consultant_name,
+            "assistant_name": c.assistant_name,
+            "rating": c.rating,
+            "rating_comment": c.rating_comment,
+            "summary": c.summary,
+            "status": c.status,
+            "created_at": c.created_at.isoformat() if c.created_at else None,
+        })
+    return {"code": 0, "data": result}
 
 
 # ════════════════════════════════════════════════════════════
@@ -751,6 +987,32 @@ def workflow_confirm(
             f"主案老师：{c.name}，客户：{member.name if member else ''}，日期：{o.appoint_date}",
             ref_id=o.id)
 
+    # ── 同步排期表（确认时可能改了日期/老师） ──
+    _sync_order_schedules(db, o)
+
+    # ★ 微信订阅消息 → 客户
+    if member and getattr(member, "openid", None):
+        try:
+            from services.wx_subscribe import notify_service_progress
+            from datetime import datetime as _dt
+            notify_service_progress(
+                openid=member.openid,
+                service_title=o.store_name or "专案服务",
+                progress="工单已确认，老师即将接单",
+                consultant_name=c.name if c else "塔塔老师",
+                service_time=str(o.appoint_date or _dt.now().strftime("%Y-%m-%d")),
+                page=f"pages/service/order-detail?id={o.id}",
+            )
+        except Exception as e:
+            import logging; logging.getLogger(__name__).warning(f"微信推送失败: {e}")
+
+    # ★ 站内通知 → 客户
+    if member:
+        _push_notif(db, "member", member.id,
+            "您的专案工单已确认",
+            f"主案老师：{c.name if c else ''}，预约日期：{o.appoint_date}，请等待老师接单。",
+            ref_id=o.id)
+
     db.commit()
     return {"code": 0, "msg": "工单已确认，已通知老师"}
 
@@ -800,6 +1062,22 @@ def workflow_accept(
             f"您的专案服务已有老师接单",
             f"{c.name if c else '老师'}老师已接受您的专案工单（{o.order_no}），老师将与您电话确认具体安排。",
             ref_id=o.id)
+
+    # ★ 微信订阅消息 → 客户（老师已接单）
+    if member and getattr(member, "openid", None):
+        try:
+            from services.wx_subscribe import notify_service_progress
+            from datetime import datetime as _dt
+            notify_service_progress(
+                openid=member.openid,
+                service_title=o.store_name or "专案服务",
+                progress="老师已接单，即将安排执案",
+                consultant_name=c.name if c else "塔塔老师",
+                service_time=str(o.appoint_date or _dt.now().strftime("%Y-%m-%d")),
+                page=f"pages/service/order-detail?id={o.id}",
+            )
+        except Exception as e:
+            import logging; logging.getLogger(__name__).warning(f"微信推送失败: {e}")
 
     db.commit()
     return {"code": 0, "msg": "接单成功，已通知销售老师和会员"}
@@ -878,7 +1156,6 @@ def workflow_start(
     member = db.query(Member).filter(Member.id == o.member_id).first() if o.member_id else None
     title = member.enterprise_name or member.name or '' if member else ''
 
-    from models.booking import ConsultantSchedule
     # 主案老师 + 助理老师都创建排期
     consultant_ids = [o.consultant_id]
     if o.assistant_id:
@@ -1074,12 +1351,50 @@ def workflow_complete(
     o.workflow_stage = "整体执案结束"
     o.workflow_progress = 100
 
+    # ── 套餐扣次 + 写入消耗明细 ──
     if o.package_id:
         pkg = db.query(ServicePackage).filter(ServicePackage.id == o.package_id).first()
         if pkg and pkg.used_times < pkg.total_times:
             pkg.used_times += 1
 
-    _add_log(db, order_id, "工单完成", "整体执案结束，套餐次数已扣减", log_type="system")
+            # 查服务信息
+            svc = db.query(Service).filter(Service.id == o.service_id).first() if o.service_id else None
+            # 查老师信息
+            consultant = db.query(Consultant).filter(Consultant.id == o.consultant_id).first() if o.consultant_id else None
+            assistant = db.query(Consultant).filter(Consultant.id == o.assistant_id).first() if o.assistant_id else None
+            # 执案摘要：拿最后一条日志的内容
+            last_log = db.query(ServiceWorkLog).filter(
+                ServiceWorkLog.order_id == o.id,
+                ServiceWorkLog.log_type.in_(['daily', 'report', 'note'])
+            ).order_by(ServiceWorkLog.id.desc()).first()
+
+            per_fee = float(pkg.per_time_fee) if pkg.per_time_fee else (
+                round(float(pkg.amount) / pkg.total_times, 2) if pkg.total_times and pkg.amount else 0
+            )
+
+            from models.consumption import PackageConsumption
+            consumption = PackageConsumption(
+                package_id=pkg.id,
+                order_id=o.id,
+                member_id=o.member_id,
+                consultant_id=o.consultant_id,
+                visit_number=pkg.used_times,
+                service_name=svc.name if svc else '',
+                service_category=svc.category if svc else '',
+                deducted_amount=per_fee,
+                duration_days=svc.duration_days if svc else o.visit_number,
+                appoint_date=o.appoint_date,
+                store_name=o.store_name,
+                consultant_name=consultant.name if consultant else '',
+                assistant_name=assistant.name if assistant else '',
+                rating=o.rating,
+                rating_comment=o.rating_comment,
+                summary=last_log.content if last_log else '',
+                status='completed',
+            )
+            db.add(consumption)
+
+    _add_log(db, order_id, "工单完成", "整体执案结束，套餐次数已扣减，消耗明细已记录", log_type="system")
 
     # 通知会员评价
     member = db.query(Member).filter(Member.id == o.member_id).first()
@@ -1114,6 +1429,34 @@ def workflow_cancel(
 
 
 # ────────── 日志工具 ──────────
+
+
+
+def _sync_order_schedules(db, order):
+    """同步工单排期到consultant_schedules表"""
+    if not order.consultant_id or not order.appoint_date:
+        return
+    service = db.query(Service).filter(Service.id == order.service_id).first() if order.service_id else None
+    duration = (service.duration_days if service and service.duration_days else 1)
+    member = db.query(Member).filter(Member.id == order.member_id).first() if order.member_id else None
+    member_name = member.name if member else "客户"
+    svc_name = service.name if service else "专案服务"
+
+    # 先清掉该工单旧的排期
+    db.query(ConsultantSchedule).filter(ConsultantSchedule.order_id == order.id).delete()
+
+    # 重新写入
+    for day_off in range(duration):
+        sch_date = order.appoint_date + timedelta(days=day_off)
+        day_label = f"{member_name}·{svc_name} Day{day_off+1}/{duration}" if duration > 1 else f"{member_name}·{svc_name}"
+        db.add(ConsultantSchedule(
+            consultant_id=order.consultant_id,
+            schedule_date=sch_date,
+            city=order.store_name or "",
+            schedule_type="busy",
+            title=day_label,
+            order_id=order.id,
+        ))
 
 def _add_log(db, order_id, stage, content, images=None, log_type="note",
             consultant_id=None, day_number=None, findings=None,

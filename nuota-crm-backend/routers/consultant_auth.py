@@ -11,11 +11,52 @@ from sqlalchemy.orm import Session
 from database import get_db
 from models import Consultant, AdminUser
 from models.booking import ConsultantApplication, ConsultantInviteCode
-from utils.auth import get_current_admin, create_token
+from utils.auth import get_current_admin, get_admin_or_agent, create_token
 from utils.helpers import ok
 
 router = APIRouter(prefix="/consultant-auth", tags=["consultant-auth"])
 admin_router = APIRouter(prefix="/admin/consultant-auth", tags=["admin-consultant-auth"])
+
+
+# ──────────────────── 工具函数 ────────────────────
+
+def _gen_consultant_referral_code():
+    """TATA-XXXX格式的老师推荐码"""
+    return f"TATA-{secrets.token_hex(3).upper()}"
+
+
+def _auto_match_salary(db: Session, consultant):
+    """根据级别自动匹配薪资配置（写入log）"""
+    from sqlalchemy import text as _text
+    try:
+        level = consultant.level or "trainee"
+        rule = db.execute(_text(
+            "SELECT * FROM salary_configs WHERE level = :lv"
+        ), {"lv": level}).mappings().first()
+        if rule:
+            # 记录匹配日志
+            from routers.notifications import push_to_all_admins
+            push_to_all_admins(
+                db,
+                title=f"薪资自动匹配 · {consultant.name}",
+                body=f"级别 {level} → 底薪¥{rule.get('base_salary',0)}",
+                ntype="system",
+            )
+    except Exception:
+        pass  # 薪资表可能还没有该级别配置
+
+
+def _auto_match_promotion(db: Session, consultant):
+    """根据级别自动关联晋级规则"""
+    from sqlalchemy import text as _text
+    try:
+        level = consultant.level or "trainee"
+        rule = db.execute(_text(
+            "SELECT * FROM promotion_rules WHERE level = :lv"
+        ), {"lv": level}).mappings().first()
+        # 规则存在即可，晋级进度由 promotion router 自动计算
+    except Exception:
+        pass
 
 
 # ──────────────────── Schemas ────────────────────
@@ -27,6 +68,10 @@ class ConsultantRegisterIn(BaseModel):
     specialty: Optional[str] = None
     company: Optional[str] = None
     service_modules: Optional[List[str]] = None
+    city: Optional[str] = None
+    id_card_last4: Optional[str] = None    # 身份证后4位
+    emergency_contact: Optional[str] = None
+    emergency_phone: Optional[str] = None
 
 
 class ConsultantLoginIn(BaseModel):
@@ -37,6 +82,9 @@ class ConsultantLoginIn(BaseModel):
 class ReviewIn(BaseModel):
     action: str          # approve / reject
     note: Optional[str] = None
+    level: Optional[str] = None         # 审核时指定级别
+    position: Optional[str] = None      # 审核时指定岗位
+    branch_id: Optional[int] = None     # 审核时指定分公司
 
 
 class TransferMembersIn(BaseModel):
@@ -123,34 +171,113 @@ def consultant_login(body: ConsultantLoginIn, db: Session = Depends(get_db)):
 def list_applications(
     status: Optional[str] = "pending",
     db: Session = Depends(get_db),
-    current_admin=Depends(get_current_admin)
+    current_admin=Depends(get_admin_or_agent)
 ):
-    """获取顾问申请列表"""
+    """获取顾问申请列表（合并 consultant_applications + admin_users pending）"""
+    # 1. consultant_applications 表
     q = db.query(ConsultantApplication)
     if status:
         q = q.filter(ConsultantApplication.status == status)
-    # 非超管只看本公司申请
     if current_admin.role != "super_admin" and current_admin.company:
         q = q.filter(ConsultantApplication.company == current_admin.company)
     apps = q.order_by(ConsultantApplication.created_at.desc()).all()
-    return ok([{
+    result = [{
         "id": a.id, "name": a.name, "phone": a.phone,
         "specialty": a.specialty, "company": a.company,
         "service_modules": a.service_modules,
         "status": a.status, "review_note": a.review_note,
         "created_at": str(a.created_at),
-    } for a in apps])
+        "source": "application",
+    } for a in apps]
+
+    # 2. admin_users 表中 pending 的记录（统一注册入口来的）
+    status_map = {"pending": "pending", "approved": "active", "rejected": "rejected"}
+    admin_status = status_map.get(status, status)
+    if status in ("pending", "approved", "rejected", "active"):
+        aq = db.query(AdminUser)
+        if status == "pending":
+            aq = aq.filter(AdminUser.status == "pending")
+        elif status == "approved" or status == "active":
+            aq = aq.filter(AdminUser.role != "super_admin", AdminUser.status == "active")
+        elif status == "rejected":
+            aq = aq.filter(AdminUser.status == "rejected")
+        if current_admin.role != "super_admin" and current_admin.company:
+            aq = aq.filter(AdminUser.company == current_admin.company)
+        # 排除已存在于 consultant_applications 的手机号
+        app_phones = {a.phone for a in apps}
+        admin_rows = aq.order_by(AdminUser.created_at.desc()).all()
+        for u in admin_rows:
+            if u.phone and u.phone not in app_phones:
+                result.append({
+                    "id": u.id, "name": u.real_name or u.username, "phone": u.phone,
+                    "specialty": "", "company": u.company or "",
+                    "service_modules": None,
+                    "status": status, "review_note": "",
+                    "created_at": str(u.created_at),
+                    "source": "admin_user",
+                })
+    return ok(result)
 
 
 @admin_router.post("/applications/{app_id}/review")
 def review_application(
     app_id: int,
     body: ReviewIn,
+    source: Optional[str] = "application",
     db: Session = Depends(get_db),
-    current_admin=Depends(get_current_admin)
+    current_admin=Depends(get_admin_or_agent)
 ):
-    """审核顾问申请：approve / reject"""
+    """审核顾问申请：approve / reject（支持 source=application 或 admin_user）"""
     import json
+
+    if source == "admin_user":
+        # 来自 admin_users 表的 pending 用户
+        user = db.query(AdminUser).filter(AdminUser.id == app_id).first()
+        if not user:
+            raise HTTPException(404, "用户不存在")
+        if current_admin.role != "super_admin":
+            if not current_admin.company or user.company != current_admin.company:
+                raise HTTPException(403, "无权审核其他分公司")
+
+        if body.action == "approve":
+            user.status = "active"
+            user.role = "consultant"
+            # 同步创建 consultants 表记录
+            exist_c = db.query(Consultant).filter(Consultant.phone == user.phone).first()
+            if not exist_c:
+                consultant = Consultant(
+                    name=user.real_name or user.username,
+                    phone=user.phone,
+                    company=user.company,
+                    password_hash=user.password_hash,
+                    status="active",
+                    level=body.level or "trainee",
+                    position=body.position,
+                    branch_id=body.branch_id,
+                    referral_code=_gen_consultant_referral_code(),
+                )
+                db.add(consultant)
+                db.flush()
+                # 自动匹配薪资配置
+                _auto_match_salary(db, consultant)
+        elif body.action == "reject":
+            user.status = "rejected"
+        else:
+            raise HTTPException(400, "action 只能是 approve 或 reject")
+        db.commit()
+
+        from routers.notifications import push_to_all_admins
+        action_text = "已通过" if body.action == "approve" else "已拒绝"
+        push_to_all_admins(
+            db,
+            title=f"老师注册审核 · {user.real_name or user.username} {action_text}",
+            body=f"申请人：{user.real_name or user.username}，审核人：{current_admin.real_name or current_admin.username}",
+            ntype="application",
+        )
+        db.commit()
+        return ok({"msg": "审核完成", "status": user.status})
+
+    # 默认：consultant_applications 表
     app = db.query(ConsultantApplication).filter(ConsultantApplication.id == app_id).first()
     if not app:
         raise HTTPException(404, "申请不存在")
@@ -171,8 +298,15 @@ def review_application(
             service_modules=json.dumps(modules, ensure_ascii=False),
             password_hash=app.password_hash,
             status="active",
+            level=body.level or "trainee",
+            position=body.position,
+            branch_id=body.branch_id,
+            referral_code=_gen_consultant_referral_code(),
         )
         db.add(consultant)
+        db.flush()
+        # 自动匹配薪资配置
+        _auto_match_salary(db, consultant)
         app.status = "approved"
     elif body.action == "reject":
         app.status = "rejected"
@@ -205,7 +339,7 @@ def review_application(
 def generate_invite_code(
     consultant_id: int,
     db: Session = Depends(get_db),
-    current_admin=Depends(get_current_admin)
+    current_admin=Depends(get_admin_or_agent)
 ):
     """为顾问生成邀请码（管理员操作）"""
     c = db.query(Consultant).filter(Consultant.id == consultant_id).first()
@@ -238,7 +372,7 @@ def generate_invite_code(
 def list_invite_codes(
     consultant_id: int,
     db: Session = Depends(get_db),
-    current_admin=Depends(get_current_admin)
+    current_admin=Depends(get_admin_or_agent)
 ):
     codes = db.query(ConsultantInviteCode).filter(
         ConsultantInviteCode.consultant_id == consultant_id
@@ -257,7 +391,7 @@ def list_invite_codes(
 def transfer_members(
     body: TransferMembersIn,
     db: Session = Depends(get_db),
-    current_admin=Depends(get_current_admin)
+    current_admin=Depends(get_admin_or_agent)
 ):
     """顾问离职：将客户转绑给新顾问（分公司负责人+超管可操作）"""
     from models import Member
@@ -277,28 +411,70 @@ def transfer_members(
     if body.member_ids:
         members = db.query(Member).filter(Member.id.in_(body.member_ids)).all()
     else:
-        # 通过服务工单找该顾问的所有客户
-        order_member_ids = db.query(ServiceOrder.member_id).filter(
-            ServiceOrder.consultant_id == body.from_consultant_id
-        ).distinct().all()
-        order_member_ids = [r[0] for r in order_member_ids]
-        members = db.query(Member).filter(Member.id.in_(order_member_ids)).all()
+        # 找该顾问归属的所有会员（销售归属）
+        members = db.query(Member).filter(
+            Member.consultant_id == body.from_consultant_id
+        ).all()
 
-    # 更新工单里的顾问归属
-    updated_orders = db.query(ServiceOrder).filter(
-        ServiceOrder.consultant_id == body.from_consultant_id
-    )
-    if body.member_ids:
-        updated_orders = updated_orders.filter(ServiceOrder.member_id.in_(body.member_ids))
-    count = updated_orders.update({"consultant_id": body.to_consultant_id}, synchronize_session=False)
+    # 只转会员归属（销售关系），不动工单（消耗/执案关系）
+    member_count = 0
+    for m in members:
+        m.consultant_id = body.to_consultant_id
+        member_count += 1
     db.commit()
 
     return ok({
-        "msg": f"已将 {count} 条工单从【{src.name}】转绑至【{dst.name}】",
-        "transferred_orders": count,
+        "msg": f"已将 {member_count} 位会员归属从【{src.name}】转至【{dst.name}】（工单执行人不变）",
+        "transferred_members": member_count,
         "from": src.name,
         "to": dst.name,
     })
+
+
+@admin_router.post("/depart/{consultant_id}")
+def consultant_depart(
+    consultant_id: int,
+    body: dict = None,
+    db: Session = Depends(get_db),
+    current_admin=Depends(get_admin_or_agent)
+):
+    """老师离职：数据保留，状态改为 departed，可选自动转绑客户"""
+    from models import Member
+    from models.service import ServiceOrder
+    body = body or {}
+
+    c = db.query(Consultant).filter(Consultant.id == consultant_id).first()
+    if not c:
+        raise HTTPException(404, "老师不存在")
+
+    if current_admin.role != "super_admin":
+        if c.company != current_admin.company:
+            raise HTTPException(403, "无权操作其他分公司")
+
+    # 标记离职，数据保留
+    c.status = "departed"
+    transferred = 0
+
+    # 如果指定了接手人，只转会员归属（销售关系），工单不动（执案关系）
+    to_id = body.get("to_consultant_id")
+    if to_id:
+        dst = db.query(Consultant).filter(Consultant.id == to_id).first()
+        if dst:
+            # 只转会员归属
+            transferred = db.query(Member).filter(
+                Member.consultant_id == consultant_id
+            ).update({"consultant_id": to_id}, synchronize_session=False)
+
+    db.commit()
+
+    from routers.notifications import push_to_all_admins
+    msg = f"{c.name} 已标记离职"
+    if to_id and transferred:
+        msg += f"，{transferred}位会员归属已转绑（工单执行人不变）"
+    push_to_all_admins(db, title="老师离职", body=msg, ntype="system")
+    db.commit()
+
+    return ok({"msg": msg, "transferred_orders": transferred})
 
 
 # ──────────────────── 老师专属看板 ────────────────────
@@ -331,7 +507,7 @@ def consultant_dashboard(
 ):
     """老师专属看板"""
     from datetime import date
-    from sqlalchemy import func, extract
+    from sqlalchemy import func, extract, text
     from models.service import ServiceOrder
     from models.booking import VisitBooking
     from models import Member
@@ -420,6 +596,65 @@ def consultant_dashboard(
         'duration_days': v.duration_days,
     } for v in upcoming]
 
+
+    # ── 晋级进度 ──
+    from models.member import Payment
+    promo_progress = None
+    try:
+        promo_rules = {}
+        for pr in db.execute(text("SELECT * FROM promotion_rules ORDER BY sort_order")).mappings().all():
+            promo_rules[pr["level"]] = dict(pr)
+
+        cur_rule = promo_rules.get(current.level, {})
+        cur_sort = cur_rule.get("sort_order", 0)
+        next_rule = None
+        for lv, rule in sorted(promo_rules.items(), key=lambda x: x[1]["sort_order"]):
+            if rule["sort_order"] == cur_sort + 1:
+                next_rule = rule
+                break
+
+        if next_rule:
+            first_of_year = date(y, 1, 1)
+            end_of_year = date(y + 1, 1, 1)
+            yr_sales = float(db.query(func.coalesce(func.sum(Payment.amount), 0)).filter(
+                Payment.consultant_id == cid, Payment.pay_status == "completed",
+                Payment.created_at >= first_of_year, Payment.created_at < end_of_year,
+            ).scalar() or 0)
+            yr_work_days = db.query(func.count(func.distinct(ServiceOrder.appoint_date))).filter(
+                ServiceOrder.consultant_id == cid,
+                ServiceOrder.appoint_date >= first_of_year, ServiceOrder.appoint_date < end_of_year,
+                ServiceOrder.status.notin_(["cancelled", "rejected"]),
+            ).scalar() or 0
+            mentee_count = db.query(func.count(Consultant.id)).filter(
+                Consultant.mentor_id == cid, Consultant.status == "active"
+            ).scalar() or 0
+
+            t_sales = float(next_rule.get("sales_target", 0))
+            t_days = next_rule.get("min_work_days", 0)
+            t_mentees = next_rule.get("min_mentees", 0)
+
+            promo_progress = {
+                "current_level": current.level,
+                "current_level_name": cur_rule.get("level_name", current.level),
+                "next_level": next_rule["level"],
+                "next_level_name": next_rule["level_name"],
+                "year": y,
+                "sales": {"actual": yr_sales, "target": t_sales, "gap": max(0, t_sales - yr_sales)},
+                "work_days": {"actual": yr_work_days, "target": t_days, "gap": max(0, t_days - yr_work_days)},
+                "mentees": {"actual": mentee_count, "target": t_mentees, "gap": max(0, t_mentees - mentee_count)},
+            }
+        else:
+            promo_progress = {
+                "current_level": current.level,
+                "current_level_name": cur_rule.get("level_name", current.level),
+                "next_level": None,
+                "next_level_name": "已达最高级",
+                "year": y,
+            }
+    except Exception as e:
+        import traceback; traceback.print_exc()
+        promo_progress = None
+
     return ok({
         'consultant': {
             'id': current.id, 'name': current.name,
@@ -442,4 +677,5 @@ def consultant_dashboard(
         },
         'upcoming_visits': upcoming_list,
         'month_clients': member_list,
+        'promotion_progress': promo_progress,
     })

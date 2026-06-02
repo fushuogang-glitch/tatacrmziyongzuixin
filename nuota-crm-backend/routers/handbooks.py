@@ -8,6 +8,7 @@ from database import get_db
 from models import Handbook, Member, AdminUser
 from schemas.api import HandbookSaveIn
 from utils.auth import get_current_member, get_current_admin
+from utils.auth import get_admin_or_agent
 from utils.helpers import ok, to_dict
 
 
@@ -59,7 +60,7 @@ def save_handbook(session_id: int, body: HandbookSaveIn,
 @admin_router.put("/{hid}/sign")
 def admin_sign(hid: int, consultant_id: int | None = None,
                db: Session = Depends(get_db),
-               _: AdminUser = Depends(get_current_admin)):
+               _: AdminUser = Depends(get_admin_or_agent)):
     h = db.query(Handbook).filter(Handbook.id == hid).first()
     if not h:
         raise HTTPException(status_code=404, detail="手册不存在")

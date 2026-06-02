@@ -25,6 +25,7 @@ def code2session(code: str) -> Dict[str, str]:
     try:
         r = httpx.get(url, params=params, timeout=5)
         data = r.json()
+        logger.info(f"wx code2session 请求: code={code[:10]}..., response={data}")
         if "openid" not in data:
             logger.warning(f"wx code2session 返回异常: {data}")
             return {"openid": "", "session_key": ""}

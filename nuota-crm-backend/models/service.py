@@ -19,10 +19,11 @@ class Service(Base):
     category = Column(String(30))                             # 发展/增长/课程/供应商服务
     brand = Column(String(50), default="塔塔")               # 塔塔/九木/九凤
     description = Column(Text)
+    introduction = Column(Text)                              # 产品详细介绍（富文本HTML）
     service_mode = Column(String(20), default="annual")       # annual=1年制 / times=按次制
     total_times = Column(Integer, default=5)                  # 按次制：包含次数（5次等）
     duration_days = Column(Integer, default=1)                # 单次服务天数(1-5天)
-    price = Column(Numeric(10, 2))                            # 正常价格
+    price = Column(Numeric(10, 2))                            # 单次价格（参考）
     trial_price = Column(Numeric(10, 2))                      # 试听价格（课程类专用）
     annual_price = Column(Numeric(10, 2))                     # 年度套餐价格
     cover_image = Column(String(255))                         # 封面图
@@ -44,11 +45,11 @@ class ServicePackage(Base):
     total_times = Column(Integer, default=0)                   # 包含次数
     used_times = Column(Integer, default=0)                    # 已使用次数
     amount = Column(Numeric(10, 2))                            # 套餐金额
-    per_time_fee = Column(Numeric(10, 2))                      # 每次扣费额 = amount / total_times
-    pay_type = Column(String(20), default="annual")             # annual/single
     start_date = Column(Date)                                  # 生效日期
     expire_date = Column(Date)                                 # 到期日期
     status = Column(String(20), default="active")              # active/expired/frozen
+    pay_type = Column(String(20), default="annual")             # annual/single
+    per_time_fee = Column(Numeric(10, 2))                          # 每次扣费额 = amount / total_times
     remark = Column(Text)
 
     created_at = Column(DateTime, server_default=func.now())

@@ -10,7 +10,7 @@ from database import get_db
 from models import Checkin, Member, Session as SessionModel, Enrollment, AdminUser
 from schemas.api import FaceCheckinIn
 from services.face_service import face_service
-from utils.auth import get_current_member, get_current_admin
+from utils.auth import get_current_member, get_current_admin, get_admin_or_agent
 from utils.helpers import ok, to_dict
 
 
@@ -185,7 +185,7 @@ def face_checkin(body: FaceCheckinIn, db: Session = Depends(get_db),
 # --------- 管理端 ---------
 @admin_router.get("/{session_id}")
 def list_checkins(session_id: int, db: Session = Depends(get_db),
-                  _: AdminUser = Depends(get_current_admin)):
+                  _: AdminUser = Depends(get_admin_or_agent)):
     rows = (
         db.query(Checkin, Member)
         .join(Member, Checkin.member_id == Member.id)
@@ -212,7 +212,7 @@ def list_checkins(session_id: int, db: Session = Depends(get_db),
 def manual_checkin(
     member_id: int, session_id: int, checkin_day: int,
     db: Session = Depends(get_db),
-    admin: AdminUser = Depends(get_current_admin),
+    admin: AdminUser = Depends(get_admin_or_agent),
 ):
     sess = db.query(SessionModel).filter(SessionModel.id == session_id).first()
     m = db.query(Member).filter(Member.id == member_id).first()
@@ -245,7 +245,7 @@ def manual_checkin(
 def admin_bind_face(
     body: dict,
     db: Session = Depends(get_db),
-    _: AdminUser = Depends(get_current_admin),
+    _: AdminUser = Depends(get_admin_or_agent),
 ):
     """管理端：给学员录入人脸（现场拍照录入）"""
     member_id = body.get('member_id')

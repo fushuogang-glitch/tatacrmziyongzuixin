@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.sql import func
 
 from database import Base, get_db
-from utils.auth import get_current_admin
+from utils.auth import get_current_admin, get_admin_or_agent
 from utils.helpers import ok
 
 router = APIRouter(prefix="/admin/notifications", tags=["notifications"])
@@ -74,7 +74,7 @@ def list_notifications(
     unread_only: bool = False,
     limit: int = 30,
     db: Session = Depends(get_db),
-    current_admin=Depends(get_current_admin),
+    current_admin=Depends(get_admin_or_agent),
 ):
     """获取当前管理员的通知列表"""
     q = db.query(Notification).filter(
@@ -123,7 +123,7 @@ def consultant_notifications(
 def mark_read(
     notif_id: int,
     db: Session = Depends(get_db),
-    current_admin=Depends(get_current_admin),
+    current_admin=Depends(get_admin_or_agent),
 ):
     n = db.query(Notification).filter(
         Notification.id == notif_id,
@@ -138,7 +138,7 @@ def mark_read(
 @router.post("/read-all")
 def mark_all_read(
     db: Session = Depends(get_db),
-    current_admin=Depends(get_current_admin),
+    current_admin=Depends(get_admin_or_agent),
 ):
     db.query(Notification).filter(
         Notification.recipient_type == "admin",

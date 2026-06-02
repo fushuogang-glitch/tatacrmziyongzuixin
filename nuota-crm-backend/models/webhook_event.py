@@ -28,18 +28,29 @@ class WebhookEvent(Base):
 
 # ═══ 事件定义 ═══
 EVENT_ROUTING = {
+    # 会员事件
     "member.created":        ["sanhe"],
     "member.tier_changed":   ["sanhe"],
-    "booking.created":       ["bafang"],
+    "member.inactive_30d":   ["sanhe"],
+    # 预约/工单事件
+    "booking.created":       ["sanhe"],                                    # 新预约
     "booking.cancelled":     ["bafang"],
+    "order.confirmed":       ["sanhe"],                                    # 工单确认→推给老师
+    "order.completed":       ["sanhe", "qixing", "baichuan", "wulu"],      # 工单完结→多方通知
+    # 收款事件
+    "payment.created":       ["baichuan"],                                 # 新收款
     "payment.completed":     ["baichuan"],
     "payment.refunded":      ["baichuan"],
+    # 组织/人事
+    "staff.changed":         ["wulu"],                                     # 员工变更
+    # 内容
+    "content.published":     ["qixing"],                                   # 内容发布
+    # 课程
+    "course.enrolled":       ["bafang", "sanhe"],
+    # 配额/安全
     "quota.exceeded":        ["bafang", "jiuyi"],
     "referral.completed":    ["sanhe"],
-    "member.inactive_30d":   ["sanhe"],
     "operation.suspicious":  ["siku", "jiuyi"],
-    "course.enrolled":       ["bafang", "sanhe"],
-    "order.completed":       ["sanhe", "baichuan"],
 }
 
 

@@ -10,8 +10,8 @@ from sqlalchemy.orm import Session
 import io
 
 from database import get_db
-from models import Member, Payment, AdminUser, FollowUp, Consultant, Service, ServicePackage, PackageConsumption
-from utils.auth import get_current_admin
+from models import Member, Payment, AdminUser, FollowUp, Service
+from utils.auth import get_current_admin, get_admin_or_agent
 from utils.helpers import ok, to_dict
 
 router = APIRouter(prefix="/admin", tags=["followup-export"])
@@ -49,7 +49,7 @@ class FollowUpIn(BaseModel):
 def list_followups(
     mid: int,
     db: Session = Depends(get_db),
-    _: AdminUser = Depends(get_current_admin),
+    _: AdminUser = Depends(get_admin_or_agent),
 ):
     """获取某学员的所有跟进记录"""
     rows = (
@@ -76,7 +76,7 @@ def add_followup(
     mid: int,
     body: FollowUpIn,
     db: Session = Depends(get_db),
-    current: AdminUser = Depends(get_current_admin),
+    current: AdminUser = Depends(get_admin_or_agent),
 ):
     """新增跟进记录，同时更新学员跟进状态"""
     member = db.query(Member).filter(Member.id == mid).first()
@@ -116,7 +116,7 @@ def add_followup(
 def delete_followup(
     fid: int,
     db: Session = Depends(get_db),
-    _: AdminUser = Depends(get_current_admin),
+    _: AdminUser = Depends(get_admin_or_agent),
 ):
     """删除跟进记录"""
     f = db.query(FollowUp).filter(FollowUp.id == fid).first()
@@ -134,7 +134,7 @@ def delete_followup(
 @router.get("/export/members")
 def export_members(
     db: Session = Depends(get_db),
-    _: AdminUser = Depends(get_current_admin),
+    _: AdminUser = Depends(get_admin_or_agent),
 ):
     """导出学员列表 Excel"""
     try:
@@ -192,40 +192,36 @@ def export_members(
 @router.get("/export/payments")
 def export_payments(
     db: Session = Depends(get_db),
-    _: AdminUser = Depends(get_current_admin),
+    _: AdminUser = Depends(get_admin_or_agent),
 ):
-    """导出收款明细 Excel"""
+    """导出收款明细 Excel（含企业名称+老师+扣费明细+消耗记录Sheet）"""
     try:
         import openpyxl
     except ImportError:
         from fastapi import HTTPException
         raise HTTPException(500, "服务端缺少 openpyxl，请联系管理员安装")
 
+    from models import Consultant, ServicePackage, PackageConsumption
+
     rows = (
-        db.query(Payment, Member)
+        db.query(Payment, Member, Service)
         .outerjoin(Member, Payment.member_id == Member.id)
+        .outerjoin(Service, Payment.service_id == Service.id)
         .order_by(desc(Payment.id))
         .limit(5000)
         .all()
     )
 
-    # 预加载关联数据
-    consultant_ids = list({p.consultant_id for p, m in rows if p.consultant_id})
-    consultants_map = {c.id: c for c in db.query(Consultant).filter(Consultant.id.in_(consultant_ids)).all()} if consultant_ids else {}
+    # 预加载
+    consultant_ids = list({p.consultant_id for p, m, s in rows if p.consultant_id})
+    cmap = {c.id: c for c in db.query(Consultant).filter(Consultant.id.in_(consultant_ids)).all()} if consultant_ids else {}
 
-    pkg_ids = list({p.package_id for p, m in rows if getattr(p, 'package_id', None)})
-    packages_map = {pk.id: pk for pk in db.query(ServicePackage).filter(ServicePackage.id.in_(pkg_ids)).all()} if pkg_ids else {}
+    pkg_ids = list({p.package_id for p, m, s in rows if p.package_id})
+    pmap = {pk.id: pk for pk in db.query(ServicePackage).filter(ServicePackage.id.in_(pkg_ids)).all()} if pkg_ids else {}
 
-    svc_ids = list({p.service_id for p, m in rows if getattr(p, 'service_id', None)})
-    services_map = {s.id: s for s in db.query(Service).filter(Service.id.in_(svc_ids)).all()} if svc_ids else {}
-
-    # 消耗明细
     all_consumptions = db.query(PackageConsumption).filter(
         PackageConsumption.package_id.in_(pkg_ids)
     ).order_by(PackageConsumption.visit_number).all() if pkg_ids else []
-    consumption_by_pkg = {}
-    for cc in all_consumptions:
-        consumption_by_pkg.setdefault(cc.package_id, []).append(cc)
 
     wb = openpyxl.Workbook()
     ws = wb.active
@@ -243,16 +239,15 @@ def export_payments(
     pay_method_map = {"company_account": "对公账户", "private_account": "私户转账",
                       "wecom": "企业微信", "wechat_proxy": "微信代收"}
 
-    for p, m in rows:
-        consultant = consultants_map.get(p.consultant_id) if p.consultant_id else None
-        pkg = packages_map.get(p.package_id) if getattr(p, 'package_id', None) else None
-        svc = services_map.get(p.service_id) if getattr(p, 'service_id', None) else None
+    for p, m, svc in rows:
+        consultant = cmap.get(p.consultant_id) if p.consultant_id else None
+        pkg = pmap.get(p.package_id) if p.package_id else None
 
         ws.append([
             p.id,
             m.member_no if m else "",
             m.name if m else "",
-            getattr(m, 'enterprise_name', '') if m else "",
+            m.enterprise_name if m else "",
             m.phone if m else "",
             consultant.name if consultant else "",
             svc.name if svc else "",

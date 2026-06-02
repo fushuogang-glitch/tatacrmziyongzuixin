@@ -42,6 +42,7 @@ class MemberRegisterIn(BaseModel):
     member_type: Optional[str] = "trial"
     referral_code: Optional[str] = None
     invite_code: Optional[str] = None  # 企业邀请码
+    create_enterprise: Optional[bool] = False  # 注册时同时创建企业
     openid: Optional[str] = None
     # 归属老师
     consultant_id: Optional[int] = None
@@ -50,6 +51,9 @@ class MemberRegisterIn(BaseModel):
     history_course_count: Optional[int] = None
     history_service_count: Optional[int] = None
     history_referral_count: Optional[int] = None
+    address: Optional[str] = None
+    district: Optional[str] = None
+    cooperation: Optional[str] = None
     # 首次缴费（新增学员时同步录入）
     first_payment_amount: Optional[float] = None     # 付款金额
     first_payment_debt: Optional[float] = None       # 欠款金额
@@ -77,6 +81,9 @@ class MemberUpdateIn(BaseModel):
     history_course_count: Optional[int] = None
     history_service_count: Optional[int] = None
     history_referral_count: Optional[int] = None
+    address: Optional[str] = None
+    district: Optional[str] = None
+    cooperation: Optional[str] = None
 class MemberOut(BaseModel):
     id: int
     name: str
@@ -167,6 +174,7 @@ class BookingApplyIn(BaseModel):
     city: Optional[str] = None
     address: Optional[str] = None
     duration_days: int = 2
+    receipt_image: Optional[str] = None          # 付款凭证图片URL
     remark: Optional[str] = None
 
 
@@ -208,17 +216,20 @@ class HandbookSaveIn(BaseModel):
 # ========= 后台缴费 =========
 class PaymentCreateIn(BaseModel):
     member_id: int
+    service_id: Optional[int] = None             # 合作项目（关联services表，兼容单选）
+    service_ids: Optional[list] = None           # 合作项目（多选，传ID数组）
     consultant_id: Optional[int] = None          # 归属老师
     amount: float
     debt_amount: Optional[float] = 0             # 欠款金额
     pay_mode: Optional[str] = "full"             # full/installment
     pay_method: Optional[str] = None             # company_account/private_account/wecom/wechat_proxy
-    pay_type: str = "annual"                     # annual/single
+    pay_type: str = "annual"
     pay_status: str = "paid"
+    total_times: Optional[int] = None              # 年费制服务次数（默认6次）
+    pay_date: Optional[str] = None               # 付费日期 YYYY-MM-DD（老客户补录用）
     due_date: Optional[str] = None               # 补款截止日 YYYY-MM-DD
+    receipt_image: Optional[str] = None          # 付款凭证图片URL
     remark: Optional[str] = None
-    total_times: Optional[int] = None            # 服务次数（年费制默认6，单次制从服务取）
-    service_id: Optional[int] = None             # 合作项目ID
 
 
 # ========= 顾问 =========
@@ -235,6 +246,9 @@ class ConsultantIn(BaseModel):
     level: Optional[str] = "trainee"
     status: str = "active"
     avatar: Optional[str] = None
+    position: Optional[str] = None
+    referrer_id: Optional[int] = None
+    mentor_id: Optional[int] = None
 
 
 # ========= 名额 =========

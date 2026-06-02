@@ -13,7 +13,7 @@ from sqlalchemy import desc
 from database import get_db
 from models.webhook_event import WebhookEvent
 from models.member import Member
-from utils.auth import get_current_admin
+from utils.auth import get_current_admin, get_admin_or_agent
 
 router = APIRouter(tags=["Webhook事件"])
 admin_router = APIRouter(prefix="/admin", tags=["补缺接口"])
@@ -75,7 +75,7 @@ class TagUpdate(BaseModel):
 def update_member_tags(
     member_id: int,
     body: TagUpdate,
-    admin=Depends(get_current_admin),
+    admin=Depends(get_admin_or_agent),
     db: DBSession = Depends(get_db),
 ):
     """更新会员标签/备注（三和用）"""
@@ -101,7 +101,7 @@ class NotificationCreate(BaseModel):
 @admin_router.post("/notifications")
 def send_notification(
     body: NotificationCreate,
-    admin=Depends(get_current_admin),
+    admin=Depends(get_admin_or_agent),
     db: DBSession = Depends(get_db),
 ):
     """向会员发送通知（三和用）— 暂存记录，后续接入推送通道"""
@@ -122,7 +122,7 @@ def send_notification(
 @admin_router.get("/operation-logs/export")
 def export_operation_logs(
     days: int = Query(30, description="导出最近N天"),
-    admin=Depends(get_current_admin),
+    admin=Depends(get_admin_or_agent),
     db: DBSession = Depends(get_db),
 ):
     """操作日志导出CSV（司库用）"""
@@ -165,7 +165,7 @@ class PaymentVerify(BaseModel):
 @admin_router.post("/payments/verify")
 def verify_payment(
     body: PaymentVerify,
-    admin=Depends(get_current_admin),
+    admin=Depends(get_admin_or_agent),
     db: DBSession = Depends(get_db),
 ):
     """对账确认（百川用）"""

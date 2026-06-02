@@ -44,6 +44,7 @@ class CourseSession(Base):
     description = Column(Text)                                 # 课程介绍（富文本）
     cover_image = Column(String(255))                          # 封面图
     highlights = Column(Text)                                  # 课程亮点（JSON数组）
+    target_audience = Column(Text)                              # 适合人群（JSON数组）
 
     # 课程回顾
     review_content = Column(Text)                              # 结课回顾

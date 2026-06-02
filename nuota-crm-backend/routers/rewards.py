@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 from database import get_db
 from models import VisitReward, Member, AdminUser
 from utils.auth import get_current_member, get_current_admin
+from utils.auth import get_admin_or_agent
 from utils.helpers import ok, to_dict
 
 
@@ -28,7 +29,7 @@ def my_rewards(db: Session = Depends(get_db), current: Member = Depends(get_curr
 def admin_list(
     status: str | None = None,
     db: Session = Depends(get_db),
-    _: AdminUser = Depends(get_current_admin),
+    _: AdminUser = Depends(get_admin_or_agent),
 ):
     q = db.query(VisitReward, Member).join(Member, VisitReward.member_id == Member.id)
     if status:
@@ -40,3 +41,25 @@ def admin_list(
         item["member"] = {"id": m.id, "name": m.name, "phone": m.phone, "member_no": m.member_no}
         data.append(item)
     return ok(data)
+
+
+
+@admin_router.post("")
+def admin_create_reward(
+    body: dict,
+    db: Session = Depends(get_db),
+    _: AdminUser = Depends(get_admin_or_agent),
+):
+    """管理员手动创建权益"""
+    from datetime import datetime
+    reward = VisitReward(
+        member_id=body["member_id"],
+        source=body.get("source", "manual"),
+        referral_id=body.get("referral_id"),
+        status=body.get("status", "available"),
+        created_at=datetime.now(),
+    )
+    db.add(reward)
+    db.commit()
+    db.refresh(reward)
+    return ok(to_dict(reward))

@@ -36,7 +36,12 @@ def create_enterprise(body: dict = {}, db: Session = Depends(get_db),
     referrer = db.query(Member).filter(Member.referral_code == referral_code).first()
     if referrer:
         valid = True
-    # 检查老师邀请码
+    # 检查老师推荐码（consultants.referral_code）
+    if not valid:
+        teacher = db.query(Consultant).filter(Consultant.referral_code == referral_code).first()
+        if teacher:
+            valid = True
+    # 检查老师邀请码（consultant_invite_codes表）
     if not valid:
         try:
             from models.booking import ConsultantInviteCode
@@ -186,6 +191,7 @@ def join_enterprise(
     if current_count >= MAX_TEAM_SIZE:
         raise HTTPException(status_code=400, detail=f"该企业团队已满（最多{MAX_TEAM_SIZE}人）")
     me.enterprise_id = invite.enterprise_id
+    me.status = "active"  # 恢复被移除的账号
     me.role = invite.role
     ent = db.query(Enterprise).filter(Enterprise.id == invite.enterprise_id).first()
     if ent:
@@ -225,6 +231,7 @@ def remove_member(
     if not m:
         raise HTTPException(status_code=404, detail="成员不存在")
     m.enterprise_id = None
+    m.status = "removed"  # 移除后禁止登录，需重新邀请
     db.commit()
     return ok({"msg": f"已移除{m.name}"})
 

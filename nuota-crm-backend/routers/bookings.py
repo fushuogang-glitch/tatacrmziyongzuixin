@@ -12,6 +12,7 @@ from services.quota_service import has_quota, quota_summary, set_monthly_cap
 from services.notify_service import notify_booking_confirmed, notify_booking_applied
 from routers.notifications import push_to_all_admins
 from utils.auth import get_current_member, get_current_admin, get_current_admin_or_consultant
+from utils.auth import get_admin_or_agent
 from utils.helpers import ok, to_dict
 
 
@@ -166,7 +167,7 @@ def admin_confirm(bid: int, body: BookingConfirmIn, db: Session = Depends(get_db
 
 @admin_router.put("/{bid}/complete")
 def admin_complete(bid: int, body: BookingCompleteIn, db: Session = Depends(get_db),
-                   _: AdminUser = Depends(get_current_admin)):
+                   _: AdminUser = Depends(get_admin_or_agent)):
     b = db.query(VisitBooking).filter(VisitBooking.id == bid).first()
     if not b:
         raise HTTPException(status_code=404, detail="预约不存在")
@@ -188,7 +189,7 @@ def admin_complete(bid: int, body: BookingCompleteIn, db: Session = Depends(get_
 
 @admin_router.put("/{bid}/cancel")
 def admin_cancel(bid: int, db: Session = Depends(get_db),
-                 _: AdminUser = Depends(get_current_admin)):
+                 _: AdminUser = Depends(get_admin_or_agent)):
     b = db.query(VisitBooking).filter(VisitBooking.id == bid).first()
     if not b:
         raise HTTPException(status_code=404, detail="预约不存在")
@@ -209,7 +210,7 @@ def admin_cancel(bid: int, db: Session = Depends(get_db),
 def monthly(
     year: int, month: int,
     db: Session = Depends(get_db),
-    _: AdminUser = Depends(get_current_admin),
+    _: AdminUser = Depends(get_admin_or_agent),
 ):
     return ok(quota_summary(db, year, month))
 
@@ -217,7 +218,7 @@ def monthly(
 @quota_router.put("/set")
 def set_cap(
     year: int, month: int, cap: int,
-    _: AdminUser = Depends(get_current_admin),
+    _: AdminUser = Depends(get_admin_or_agent),
 ):
     set_monthly_cap(year, month, cap)
     return ok({"year": year, "month": month, "cap": cap})

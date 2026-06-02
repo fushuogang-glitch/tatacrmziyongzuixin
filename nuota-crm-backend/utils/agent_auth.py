@@ -29,13 +29,26 @@ PERMISSION_BLOCKS = {
 # Agent专属可访问路径（覆盖block规则）
 AGENT_OVERRIDES = {
     "baichuan": {
-        # 百川是财务，可以看payments但不能写
+        # 百川是财务负责人：payments只读 + 采购管理全权限 + 储值全权限
         "allow": ["/admin/payments", "/admin/export/payments"],
         "methods": ["GET"],
+        # 采购/储值：百川全权限（增删改查）
+        "allow_write": ["/admin/purchases", "/admin/recharges"],
+        "write_methods": ["GET", "POST", "PUT", "DELETE"],
     },
     "siku": {
         # 司库可以看日志
         "allow": ["/admin/operation-logs"],
+        "methods": ["GET"],
+    },
+    "taicai": {
+        # 塔才：深度分析读写（拉待分析+回写结果）
+        "allow_write": ["/agent/deep-analysis"],
+        "write_methods": ["GET", "POST", "PUT"],
+    },
+    "sanhe": {
+        # 三和：客户管理+缴费只读（用于分析续费/补款）
+        "allow": ["/agent/members", "/agent/finance/payments", "/agent/services", "/agent/workorders"],
         "methods": ["GET"],
     },
 }
@@ -110,6 +123,16 @@ def check_agent_permission(request: Request, agent: Optional[AgentAuth]):
     path = request.url.path
     method = request.method.upper()
 
+    # 【优先】override 可写路径：放行（在 readonly 拦截之前）
+    _ov = AGENT_OVERRIDES.get(agent.agent_id)
+    if _ov:
+        for _wp in _ov.get("allow_write", []):
+            if path.startswith(_wp):
+                _wm = _ov.get("write_methods", ["GET", "POST", "PUT", "DELETE"])
+                if method in _wm:
+                    return
+                raise HTTPException(status_code=403, detail=f"Agent [{agent.agent_name}] 不允许 {method} {path}")
+
     # readonly 只能 GET
     if agent.permission_level == "readonly" and method != "GET":
         raise HTTPException(status_code=403, detail=f"Agent [{agent.agent_name}] 只有只读权限")
@@ -121,6 +144,18 @@ def check_agent_permission(request: Request, agent: Optional[AgentAuth]):
     # 检查 override
     override = AGENT_OVERRIDES.get(agent.agent_id)
     if override:
+        # 1) allow_write：可写路径（增删改查全开）
+        for wpath in override.get("allow_write", []):
+            if path.startswith(wpath):
+                wmethods = override.get("write_methods", ["GET", "POST", "PUT", "DELETE"])
+                if method in wmethods:
+                    return
+                else:
+                    raise HTTPException(
+                        status_code=403,
+                        detail=f"Agent [{agent.agent_name}] 不允许 {method} {path}"
+                    )
+        # 2) allow：只读路径
         for allowed_path in override.get("allow", []):
             if path.startswith(allowed_path):
                 allowed_methods = override.get("methods", ["GET", "POST", "PUT", "DELETE"])

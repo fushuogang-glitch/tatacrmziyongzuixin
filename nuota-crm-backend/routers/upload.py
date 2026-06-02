@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime
 from fastapi import APIRouter, UploadFile, File, Depends
 from utils.helpers import ok
-from utils.auth import get_current_admin
+from utils.auth import get_current_admin, get_admin_or_agent
 
 router = APIRouter(prefix="/admin/upload", tags=["upload"])
 
@@ -12,7 +12,7 @@ UPLOAD_DIR = "/www/nuota-crm/static/uploads"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 @router.post("/image")
-async def upload_image(file: UploadFile = File(...), _=Depends(get_current_admin)):
+async def upload_image(file: UploadFile = File(...), _=Depends(get_admin_or_agent)):
     """上传图片，返回URL"""
     ext = os.path.splitext(file.filename or 'img.png')[1] or '.png'
     fname = f"{datetime.now().strftime('%Y%m%d')}_{uuid.uuid4().hex[:8]}{ext}"

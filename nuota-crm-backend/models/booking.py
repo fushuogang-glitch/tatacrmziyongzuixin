@@ -19,10 +19,13 @@ class Consultant(Base):
     monthly_days = Column(Integer, default=14)
     course_days = Column(Integer, default=8)
     status = Column(String(20), default="active")
-    level = Column(String(30), default="trainee")
-    branch_id = Column(Integer, ForeignKey('branches.id'), index=True)
-    referral_code = Column(String(20), unique=True, index=True)
+    level = Column(String(30), default="trainee")                # 级别：trainee/probation/pm/pd/junior_partner/partner/senior_partner/founding_partner
+    branch_id = Column(Integer, ForeignKey('branches.id'), index=True)  # 所属分公司ID
+    referral_code = Column(String(20), unique=True, index=True)  # 老师推荐码
     avatar = Column(Text, nullable=True)  # 头像URL
+    position = Column(String(50), nullable=True)  # 岗位
+    referrer_id = Column(Integer, ForeignKey("consultants.id"), nullable=True)  # 推荐人
+    mentor_id = Column(Integer, ForeignKey("consultants.id"), nullable=True)  # 带教人
     created_at = Column(DateTime, server_default=func.now())
 
 

@@ -63,7 +63,12 @@ def list_articles(
     """小程序端：获取已发布的内容列表"""
     q = db.query(Article).filter(Article.status == "published")
     if category:
-        q = q.filter(Article.category == category)
+        # promo映射member_story(兼容CRM端分类名)
+        cat_alias = {"promo": ["promo", "member_story"], "member_story": ["promo", "member_story"]}
+        if category in cat_alias:
+            q = q.filter(Article.category.in_(cat_alias[category]))
+        else:
+            q = q.filter(Article.category == category)
     if brand:
         q = q.filter(Article.brand == brand)
     total = q.count()

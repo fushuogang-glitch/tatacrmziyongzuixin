@@ -14,7 +14,7 @@ from models import (
 from models.session import Session as CourseSession
 from models.booking import ConsultantSchedule
 from utils.helpers import ok
-from utils.auth import get_current_admin_or_consultant
+from utils.auth import get_current_admin, get_admin_or_agent, get_current_admin_or_consultant
 
 
 router = APIRouter(prefix="/admin/calendar", tags=["calendar"])
@@ -46,8 +46,9 @@ def month_view(
     events = []
 
     # ── 专案服务工单 ──
+    # 扩大查询范围：appoint_date可能在月初前但duration跨入当月
     q = db.query(ServiceOrder).filter(
-        ServiceOrder.appoint_date >= first_day,
+        ServiceOrder.appoint_date >= first_day - timedelta(days=5),
         ServiceOrder.appoint_date <= last_day,
         ServiceOrder.status.notin_(["cancelled"]),
     )
@@ -74,24 +75,44 @@ def month_view(
         member = members_map.get(o.member_id)
         service = services_map.get(o.service_id) if o.service_id else None
         consultant = consultants_map.get(o.consultant_id) if o.consultant_id else None
-        events.append({
-            "id": f"order-{o.id}",
-            "type": "service_order",
-            "type_label": "专案服务",
-            "date": _fmt_date(o.appoint_date),
-            "time_slot": o.appoint_time or "",
-            "title": service.name if service else "专案服务",
-            "member_name": member.name if member else "—",
-            "member_phone": (member.phone[-4:] if member else ""),
-            "consultant_name": consultant.name if consultant else "待分配",
-            "consultant_id": o.consultant_id,
-            "status": o.status,
-            "status_label": _order_status_label(o.status),
-            "color": _order_color(o.status),
-            "store_name": o.store_name or "",
-            "order_no": o.order_no or "",
-            "order_id": o.id,
-        })
+        # 按 duration_days 展开多天（默认1天）
+        duration = (service.duration_days if service and service.duration_days else 1)
+        base_date = o.appoint_date
+        for day_offset in range(duration):
+            ev_date = base_date + timedelta(days=day_offset) if base_date else None
+            if ev_date and ev_date < first_day:
+                continue
+            if ev_date and ev_date > last_day:
+                break
+            day_label = f"Day{day_offset+1}/{duration}" if duration > 1 else ""
+            _member_name = member.name if member else "—"
+            _consultant_name = consultant.name if consultant else "待分配"
+            _store = o.store_name or ""
+            _day_tag = f"Day{day_offset+1}/{duration}" if duration > 1 else ""
+            # 显示格式：客户·老师·门店·Day几（精简，不重复客户名）
+            _chip_parts = [_member_name, _consultant_name, _store]
+            if _day_tag:
+                _chip_parts.append(_day_tag)
+            _chip_title = " · ".join([p for p in _chip_parts if p])
+            events.append({
+                "id": f"order-{o.id}-d{day_offset}" if duration > 1 else f"order-{o.id}",
+                "type": "service_order",
+                "type_label": "专案服务",
+                "date": _fmt_date(ev_date),
+                "time_slot": (o.appoint_time or ""),
+                "title": _chip_title,
+                "member_name": _member_name,
+                "member_phone": (member.phone[-4:] if member else ""),
+                "consultant_name": _consultant_name,
+                "consultant_id": o.consultant_id,
+                "status": o.status,
+                "status_label": _order_status_label(o.status),
+                "color": _order_color(o.status),
+                "store_name": _store,
+                "order_no": o.order_no or "",
+                "order_id": o.id,
+                "workflow_progress": o.workflow_progress or 0,
+            })
 
     # ── 下店预约 ──
     q2 = db.query(VisitBooking).filter(
@@ -194,6 +215,9 @@ def month_view(
     _sch_color = {'available': '#9b59b6', 'busy': '#e74c3c', 'leave': '#95a5a6'}
 
     for s in scheds:
+        # 跳过已有工单关联的排期（工单已展开多天，避免重复）
+        if s.order_id:
+            continue
         c = sch_consultants_map.get(s.consultant_id)
         events.append({
             "id": f"schedule-{s.id}",

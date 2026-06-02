@@ -125,3 +125,89 @@ def get_current_admin_or_consultant(
         return CurrentUser(role='consultant', user_id=uid, consultant_id=uid, obj=c)
 
     raise HTTPException(status_code=401, detail="身份无效")
+
+
+# ═══ Agent + Admin 双认证 ═══
+def get_current_admin_or_agent(
+    token: Optional[str] = Depends(oauth2_admin),
+    db: Session = Depends(get_db),
+):
+    """
+    /admin/* 路由统一鉴权：
+    1. 优先检查 X-Api-Key（Agent认证）
+    2. 没有则走 JWT（管理员认证）
+    返回 AdminUser 对象或 AgentAuth 伪装的 AdminUser
+    """
+    from fastapi import Request
+    # 这个函数不能直接拿 Request，需要用下面的工厂版本
+    raise NotImplementedError('Use get_admin_or_agent_dep instead')
+
+
+from fastapi import Request as _Request
+
+def _get_admin_or_agent(request: _Request, token: Optional[str] = Depends(oauth2_admin), db: Session = Depends(get_db)):
+    """
+    统一鉴权依赖：Agent Key 优先，其次 JWT。
+    Agent 通过后返回一个伪 AdminUser（id=-1, role='agent', username=agent_id）。
+    Agent 请求需通过 IP 白名单校验。
+    """
+    from models.agent import AgentApiKey
+    from utils.agent_auth import AgentAuth, check_agent_permission
+    from utils.ip_whitelist import get_whitelist, ip_in_whitelist, get_client_ip
+
+    # 1. 检查 Agent Key
+    api_key = request.headers.get('X-Api-Key') or request.headers.get('x-api-key')
+    if api_key:
+        from datetime import datetime as _dt
+
+        # IP 白名单校验
+        client_ip = get_client_ip(request)
+        whitelist = get_whitelist(db)
+        if not ip_in_whitelist(client_ip, whitelist):
+            raise HTTPException(
+                status_code=403,
+                detail=f'IP [{client_ip}] 不在白名单中，禁止访问'
+            )
+
+        key_obj = db.query(AgentApiKey).filter(
+            AgentApiKey.api_key == api_key,
+            AgentApiKey.is_active == True,
+        ).first()
+        if not key_obj:
+            raise HTTPException(status_code=401, detail='无效的 Agent API Key')
+        # 更新最后使用时间
+        key_obj.last_used_at = _dt.utcnow()
+        db.commit()
+        # 权限检查
+        agent = AgentAuth(
+            agent_id=key_obj.agent_id,
+            agent_name=key_obj.agent_name,
+            permission_level=key_obj.permission_level,
+            key_obj=key_obj,
+        )
+        check_agent_permission(request, agent)
+        # 返回伪 AdminUser 对象，兼容现有路由
+        class _FakeAdmin:
+            id = -1
+            username = key_obj.agent_id
+            real_name = key_obj.agent_name
+            role = 'agent'
+            status = 'active'
+            phone = None
+        return _FakeAdmin()
+
+    # 2. 走 JWT
+    if not token:
+        raise HTTPException(status_code=401, detail='未登录（需要 JWT 或 X-Api-Key）')
+    payload = decode_token(token)
+    if payload.get('role') not in ('admin', 'operator', 'super_admin'):
+        raise HTTPException(status_code=401, detail='非管理员身份')
+    admin_id = int(payload.get('sub', 0))
+    admin = db.query(AdminUser).filter(AdminUser.id == admin_id, AdminUser.status == 'active').first()
+    if not admin:
+        raise HTTPException(status_code=401, detail='账号不存在或已停用')
+    return admin
+
+
+# 导出给路由用的依赖
+get_admin_or_agent = _get_admin_or_agent

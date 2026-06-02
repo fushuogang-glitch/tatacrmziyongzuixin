@@ -56,6 +56,9 @@ class Member(Base):
     # Agent 标签 & 备注
     tags = Column(String(500))                                  # 标签（逗号分隔）
     notes = Column(Text)                                        # 备注
+    address = Column(String(200))                               # 门店详细地址
+    district = Column(String(50))                               # 城市区域(区/县)
+    cooperation = Column(Text)                                  # 合作内容
 
     # 协议签约状态
     agreement_signed = Column(Boolean, default=False)
@@ -89,4 +92,14 @@ class Payment(Base):
     # 百川对账
     verified = Column(Boolean, default=False)                   # 对账确认
     verify_notes = Column(Text)                                 # 对账备注
+    receipt_image = Column(String(500))                        # 付款凭证图片URL
     created_at = Column(DateTime, server_default=func.now())
+
+
+class PaymentService(Base):
+    """缴费-服务关联表（多对多）"""
+    __tablename__ = "payment_services"
+
+    id = Column(Integer, primary_key=True, index=True)
+    payment_id = Column(Integer, ForeignKey("payments.id", ondelete="CASCADE"), nullable=False, index=True)
+    service_id = Column(Integer, ForeignKey("services.id"), nullable=False, index=True)

@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session as DBSession
 
 from database import get_db
 from models.agent import AgentApiKey
-from utils.auth import get_current_admin
+from utils.auth import get_current_admin, get_admin_or_agent
 from utils.agent_auth import generate_api_key
 
 router = APIRouter(prefix="/admin/agents", tags=["Agent管理"])
@@ -38,13 +38,13 @@ class AgentKeyOut(BaseModel):
 
 # ═══ CRUD ═══
 @router.get("", response_model=List[AgentKeyOut])
-def list_agent_keys(admin=Depends(get_current_admin), db: DBSession = Depends(get_db)):
+def list_agent_keys(admin=Depends(get_admin_or_agent), db: DBSession = Depends(get_db)):
     """列出所有 Agent API Key"""
     return db.query(AgentApiKey).order_by(AgentApiKey.id).all()
 
 
 @router.post("", response_model=AgentKeyOut)
-def create_agent_key(body: AgentKeyCreate, admin=Depends(get_current_admin), db: DBSession = Depends(get_db)):
+def create_agent_key(body: AgentKeyCreate, admin=Depends(get_admin_or_agent), db: DBSession = Depends(get_db)):
     """创建 Agent API Key"""
     exists = db.query(AgentApiKey).filter(AgentApiKey.agent_id == body.agent_id).first()
     if exists:
@@ -64,7 +64,7 @@ def create_agent_key(body: AgentKeyCreate, admin=Depends(get_current_admin), db:
 
 
 @router.put("/{agent_id}/regenerate", response_model=AgentKeyOut)
-def regenerate_key(agent_id: str, admin=Depends(get_current_admin), db: DBSession = Depends(get_db)):
+def regenerate_key(agent_id: str, admin=Depends(get_admin_or_agent), db: DBSession = Depends(get_db)):
     """重新生成 API Key"""
     key = db.query(AgentApiKey).filter(AgentApiKey.agent_id == agent_id).first()
     if not key:
@@ -76,7 +76,7 @@ def regenerate_key(agent_id: str, admin=Depends(get_current_admin), db: DBSessio
 
 
 @router.put("/{agent_id}/toggle")
-def toggle_agent(agent_id: str, admin=Depends(get_current_admin), db: DBSession = Depends(get_db)):
+def toggle_agent(agent_id: str, admin=Depends(get_admin_or_agent), db: DBSession = Depends(get_db)):
     """启用/禁用 Agent"""
     key = db.query(AgentApiKey).filter(AgentApiKey.agent_id == agent_id).first()
     if not key:
@@ -87,7 +87,7 @@ def toggle_agent(agent_id: str, admin=Depends(get_current_admin), db: DBSession 
 
 
 @router.delete("/{agent_id}")
-def delete_agent(agent_id: str, admin=Depends(get_current_admin), db: DBSession = Depends(get_db)):
+def delete_agent(agent_id: str, admin=Depends(get_admin_or_agent), db: DBSession = Depends(get_db)):
     """删除 Agent Key"""
     key = db.query(AgentApiKey).filter(AgentApiKey.agent_id == agent_id).first()
     if not key:

@@ -16,7 +16,7 @@ from models import (
 from models.course_session import (
     CourseSession, CourseEnrollment, CourseCheckin, CourseFollowup,
 )
-from utils.auth import get_current_admin, get_current_member
+from utils.auth import get_current_admin, get_admin_or_agent, get_current_member
 from utils.helpers import ok, to_dict
 
 # ============================================================
@@ -48,7 +48,7 @@ class SessionCreate(BaseModel):
 
 
 class EnrollCreate(BaseModel):
-    session_id: int
+    session_id: Optional[int] = None
     price_type: Optional[str] = "normal"   # normal/trial
 
 
@@ -61,7 +61,7 @@ def admin_list_sessions(
     status: Optional[str] = None,
     service_id: Optional[int] = None,
     db: Session = Depends(get_db),
-    _: AdminUser = Depends(get_current_admin),
+    _: AdminUser = Depends(get_admin_or_agent),
 ):
     """场次列表（可按状态/课程筛选）"""
     q = db.query(CourseSession)
@@ -85,7 +85,7 @@ def admin_list_sessions(
 def admin_create_session(
     body: SessionCreate,
     db: Session = Depends(get_db),
-    _: AdminUser = Depends(get_current_admin),
+    _: AdminUser = Depends(get_admin_or_agent),
 ):
     """创建课程场次"""
     svc = db.query(Service).filter(Service.id == body.service_id).first()
@@ -121,7 +121,7 @@ def admin_create_session(
 def admin_update_session(
     sid: int, body: dict,
     db: Session = Depends(get_db),
-    _: AdminUser = Depends(get_current_admin),
+    _: AdminUser = Depends(get_admin_or_agent),
 ):
     """更新场次信息"""
     cs = db.query(CourseSession).filter(CourseSession.id == sid).first()
@@ -145,7 +145,7 @@ def admin_update_session(
 def admin_delete_session(
     sid: int,
     db: Session = Depends(get_db),
-    _: AdminUser = Depends(get_current_admin),
+    _: AdminUser = Depends(get_admin_or_agent),
 ):
     cs = db.query(CourseSession).filter(CourseSession.id == sid).first()
     if not cs:
@@ -165,7 +165,7 @@ def admin_delete_session(
 def admin_list_enrollments(
     sid: int,
     db: Session = Depends(get_db),
-    _: AdminUser = Depends(get_current_admin),
+    _: AdminUser = Depends(get_admin_or_agent),
 ):
     """查看场次下所有报名（含会员信息+签到记录）"""
     enrollments = (
@@ -211,7 +211,7 @@ def admin_list_enrollments(
 def admin_create_enrollment(
     sid: int, body: dict,
     db: Session = Depends(get_db),
-    _: AdminUser = Depends(get_current_admin),
+    _: AdminUser = Depends(get_admin_or_agent),
 ):
     """管理端手动添加报名"""
     cs = db.query(CourseSession).filter(CourseSession.id == sid).first()
@@ -255,7 +255,7 @@ def admin_create_enrollment(
 def admin_pay_enrollment(
     eid: int, body: dict,
     db: Session = Depends(get_db),
-    _: AdminUser = Depends(get_current_admin),
+    _: AdminUser = Depends(get_admin_or_agent),
 ):
     """确认付费"""
     e = db.query(CourseEnrollment).filter(CourseEnrollment.id == eid).first()
@@ -278,7 +278,7 @@ def admin_pay_enrollment(
 def admin_checkin(
     sid: int, body: dict,
     db: Session = Depends(get_db),
-    _: AdminUser = Depends(get_current_admin),
+    _: AdminUser = Depends(get_admin_or_agent),
 ):
     """扫脸签到（管理端触发）
     body: { member_id, day_number, checkin_type: "face"|"manual", face_score, photo_url }
@@ -347,7 +347,7 @@ def admin_checkin(
 def admin_add_followup(
     eid: int, body: dict,
     db: Session = Depends(get_db),
-    _: AdminUser = Depends(get_current_admin),
+    _: AdminUser = Depends(get_admin_or_agent),
 ):
     """手动添加跟进记录"""
     e = db.query(CourseEnrollment).filter(CourseEnrollment.id == eid).first()
@@ -383,7 +383,7 @@ def admin_add_followup(
 def admin_mark_deal(
     eid: int, body: dict,
     db: Session = Depends(get_db),
-    _: AdminUser = Depends(get_current_admin),
+    _: AdminUser = Depends(get_admin_or_agent),
 ):
     """标记现场签单"""
     e = db.query(CourseEnrollment).filter(CourseEnrollment.id == eid).first()
@@ -405,7 +405,7 @@ def admin_mark_deal(
 def admin_end_session(
     sid: int,
     db: Session = Depends(get_db),
-    _: AdminUser = Depends(get_current_admin),
+    _: AdminUser = Depends(get_admin_or_agent),
 ):
     """手动结课"""
     cs = db.query(CourseSession).filter(CourseSession.id == sid).first()

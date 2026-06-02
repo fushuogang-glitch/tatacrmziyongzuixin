@@ -28,6 +28,7 @@ from routers.bookings import (
 )
 from routers.handbooks import router as handbooks_router, admin_router as handbooks_admin_router
 from routers.admin import router as admin_router
+from routers.customers import router as customers_router
 from routers.services import router as services_router, admin_router as services_admin_router
 from routers.agreements import router as agreements_router
 from routers.calendar import router as calendar_router, public_router as calendar_public_router
@@ -44,6 +45,7 @@ from routers.course_sessions import (
 )
 from routers.agents import router as agents_router
 from routers.webhook_events import router as webhook_events_router, admin_router as webhook_admin_router
+from routers.agent_api import router as agent_api_router
 from utils.auth import hash_password
 
 
@@ -195,6 +197,19 @@ def migrate_consultant_v2(db: Session = Depends(get_db)):
 
 
 # ---- 学员端路由 ----
+
+# 公开分公司列表（注册页用，不需要token）
+from fastapi import APIRouter as _AR
+_public_router = _AR(tags=["public"])
+
+@_public_router.get("/admin/branches/public")
+def public_branches(db = Depends(get_db)):
+    from models.branch import Branch
+    items = db.query(Branch).filter(Branch.status == "active").order_by(Branch.id).all()
+    return {"code": 0, "msg": "ok", "data": [{"id": b.id, "name": b.name, "short_name": b.short_name, "city": b.city} for b in items]}
+
+app.include_router(_public_router)
+
 app.include_router(auth_router)
 app.include_router(members_router)
 app.include_router(face_router)
@@ -218,6 +233,7 @@ app.include_router(quota_router)
 app.include_router(handbooks_admin_router)
 app.include_router(services_admin_router)
 app.include_router(admin_router)
+app.include_router(customers_router)
 app.include_router(calendar_router)
 app.include_router(calendar_public_router)
 app.include_router(consultant_auth_router)
@@ -235,6 +251,7 @@ app.include_router(cs_webhook_router)
 app.include_router(agents_router)
 app.include_router(webhook_events_router)
 app.include_router(webhook_admin_router)
+app.include_router(agent_api_router)
 
 
 if __name__ == "__main__":
@@ -254,3 +271,24 @@ app.mount('/static', StaticFiles(directory='/www/nuota-crm/static'), name='stati
 # ── 微信支付 ──
 from routers.payment import router as payment_router
 app.include_router(payment_router)
+
+# 推荐码验证API
+from routers.referral_api import router as referral_verify_router
+app.include_router(referral_verify_router)
+
+# 会员通知接口（小程序端）
+from routers.member_notifications import router as member_notif_router
+from routers.salary import router as salary_router
+app.include_router(member_notif_router)
+app.include_router(salary_router)
+from routers.promotion import router as promotion_router
+app.include_router(promotion_router)
+from routers.banners import router as banners_router
+app.include_router(banners_router)
+# 采购+储值管理（2026-06-02）
+from routers.purchase_recharge import router as pr_router
+app.include_router(pr_router)
+
+# 会员深度分析 + 老师人才模型分析（2026-06-02·塔才）
+from routers.deep_analysis import router as da_router
+app.include_router(da_router)

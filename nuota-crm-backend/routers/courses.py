@@ -311,3 +311,49 @@ def admin_complete_enrollment(enrollment_id: int, db: Session = Depends(get_db))
     e.completed_at = datetime.now()
     db.commit()
     return {"code": 0, "msg": "已完成"}
+
+
+# ══════════════════ 小程序端报名 ══════════════════
+
+class CourseEnrollBody(BaseModel):
+    course_id: int
+    member_id: Optional[int] = None
+    attendee_name: Optional[str] = None
+    attendee_phone: Optional[str] = None
+
+@router.post("/enroll")
+def enroll_course(body: CourseEnrollBody, db: Session = Depends(get_db)):
+    """小程序端课程报名"""
+    course = db.query(Course).filter(Course.id == body.course_id).first()
+    if not course:
+        raise HTTPException(404, "课程不存在")
+    if course.status not in ("published", "ongoing"):
+        raise HTTPException(400, "课程未开放报名")
+
+    # 检查是否已报名
+    existing = db.query(CourseEnrollment).filter(
+        CourseEnrollment.course_id == body.course_id,
+        CourseEnrollment.member_phone == body.attendee_phone
+    ).first()
+    if existing:
+        return {"code": 0, "msg": "您已报名", "data": {"id": existing.id}}
+
+    # 检查名额
+    count = db.query(CourseEnrollment).filter(CourseEnrollment.course_id == body.course_id).count()
+    if course.max_seats and count >= course.max_seats:
+        raise HTTPException(400, "名额已满")
+
+    enrollment = CourseEnrollment(
+        course_id=body.course_id,
+        member_id=body.member_id,
+        member_name=body.attendee_name or "",
+        member_phone=body.attendee_phone or "",
+        status="pending",
+        payment_status="unpaid",
+        pay_amount=course.price or 0,
+    )
+    db.add(enrollment)
+    db.commit()
+    db.refresh(enrollment)
+
+    return {"code": 0, "msg": "报名成功", "data": {"id": enrollment.id}}

@@ -35,13 +35,23 @@ def wx_login(body: WxLoginIn, db: Session = Depends(get_db)):
             "token": tmp,
         })
 
+    # 被移除的员工禁止登录
+    if member.status == "removed":
+        return ok({
+            "need_register": False,
+            "blocked": True,
+            "msg": "您的账号已被企业管理员移除，请联系管理员重新邀请",
+        })
+
     token = create_token(subject=member.id, role="member", extra={"openid": openid})
     return ok({
         "need_register": False,
         "token": token,
         "user": to_dict(member, [
             "id", "name", "phone", "member_no", "member_type",
-            "referral_code", "status", "enroll_date", "expire_date"
+            "referral_code", "status", "enroll_date", "expire_date",
+            "enterprise_name", "city", "role", "enterprise_id",
+            "consultant_id", "member_tier", "gender", "birthday",
         ]),
     })
 
@@ -60,4 +70,24 @@ def admin_login(body: AdminLoginIn, db: Session = Depends(get_db)):
         "role": user.role,
         "expires_in_days": settings.JWT_EXPIRE_DAYS,
         "user": {"id": user.id, "username": user.username, "real_name": user.real_name},
+    })
+
+
+@router.post("/debug-login")
+async def debug_login(body: dict, db: Session = Depends(get_db)):
+    """开发者工具调试专用，用member_id直接登录"""
+    member_id = body.get("member_id", 1)
+    member = db.query(Member).filter(Member.id == member_id).first()
+    if not member:
+        return fail("会员不存在")
+    token = create_token(subject=member.id, role="member", extra={"openid": member.openid or "debug"})
+    return ok({
+        "need_register": False,
+        "token": token,
+        "user": to_dict(member, [
+            "id", "name", "phone", "member_no", "member_type",
+            "referral_code", "status", "enroll_date", "expire_date",
+            "enterprise_name", "city", "role", "enterprise_id",
+            "consultant_id", "member_tier", "gender", "birthday",
+        ]),
     })

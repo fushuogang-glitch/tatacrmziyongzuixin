@@ -1,3 +1,4 @@
+from utils.auth import get_current_member
 # 协议签约路由 —— 强制签约审计
 import hashlib
 from datetime import datetime
@@ -70,7 +71,7 @@ router = APIRouter(prefix="/api/v1/agreements", tags=["协议签约"])
 
 
 class SignBody(BaseModel):
-    member_id: int
+    member_id: Optional[int] = None
     signature: Optional[str] = None  # 手写签名 base64（可选）
 
 
@@ -89,7 +90,9 @@ def get_current_agreement():
 
 
 @router.get("/check")
-def check_agreement_signed(member_id: int, db: Session = Depends(get_db)):
+def check_agreement_signed(member_id: Optional[int] = None, db: Session = Depends(get_db), current = Depends(get_current_member)):
+    if not member_id:
+        member_id = current.id
     """检查用户是否已签约最新版协议"""
     member = db.query(Member).filter(Member.id == member_id).first()
     if not member:
@@ -111,10 +114,12 @@ def check_agreement_signed(member_id: int, db: Session = Depends(get_db)):
 
 @router.post("/sign")
 def sign_agreement(
-    body: SignBody, request: Request, db: Session = Depends(get_db)
+    body: SignBody, request: Request, db: Session = Depends(get_db),
+    current: Member = Depends(get_current_member)
 ):
     """会员签约协议"""
-    member = db.query(Member).filter(Member.id == body.member_id).first()
+    mid = body.member_id or current.id
+    member = db.query(Member).filter(Member.id == mid).first()
     if not member:
         raise HTTPException(404, "会员不存在")
 
@@ -123,7 +128,7 @@ def sign_agreement(
 
     # 写入审计表
     audit = UserAgreement(
-        member_id=body.member_id,
+        member_id=mid,
         agreement_version=CURRENT_AGREEMENT_VERSION,
         agreement_hash=AGREEMENT_HASH,
         signed_at=datetime.now(),
@@ -153,7 +158,9 @@ def sign_agreement(
 
 
 @router.get("/history")
-def agreement_history(member_id: int, db: Session = Depends(get_db)):
+def agreement_history(member_id: Optional[int] = None, db: Session = Depends(get_db), current = Depends(get_current_member)):
+    if not member_id:
+        member_id = current.id
     """签约历史"""
     records = db.query(UserAgreement).filter(
         UserAgreement.member_id == member_id

@@ -11,7 +11,7 @@ from database import get_db
 from models import (
     Member, Payment, Session as SessionModel, Enrollment,
     Referral, VisitReward, VisitBooking, Consultant, AdminUser,
-    ServiceOrder, ServicePackage,
+    ServiceOrder, ServicePackage, PaymentService,
 )
 from models.booking import ConsultantSchedule
 from models.service import Service
@@ -22,7 +22,7 @@ from schemas.api import (
 )
 from services.referral_service import bind_referral, confirm_referral_on_payment
 from services.notify_service import notify_referral_reward
-from utils.auth import get_current_admin, get_current_admin_or_consultant
+from utils.auth import get_current_admin, get_admin_or_agent, get_current_admin_or_consultant
 from utils.helpers import ok, to_dict, gen_member_no, gen_referral_code
 from routers.members import _member_out
 
@@ -46,7 +46,7 @@ def log_operation(db: Session, admin: AdminUser, action: str, target_type: str =
         pass
 
 
-def require_super_admin(current: AdminUser = Depends(get_current_admin)):
+def require_super_admin(current: AdminUser = Depends(get_admin_or_agent)):
     """仅超级管理员可操作"""
     if getattr(current, 'role', 'admin') != 'super_admin':
         raise HTTPException(status_code=403, detail="需要超级管理员权限")
@@ -71,7 +71,7 @@ def list_members(
     q: Optional[str] = None, member_type: Optional[str] = None,
     status: Optional[str] = None,
     db: Session = Depends(get_db),
-    _: AdminUser = Depends(get_current_admin),
+    _: AdminUser = Depends(get_admin_or_agent),
 ):
     query = db.query(Member)
     if q:
@@ -95,7 +95,7 @@ def list_members(
 
 @router.get("/members/by-tier")
 def members_by_tier(db: Session = Depends(get_db),
-                   _: AdminUser = Depends(get_current_admin)):
+                   _: AdminUser = Depends(get_admin_or_agent)):
     """按等级分组，返回每级学员列表"""
     TIER_ORDER = [
         ("kindergarten", "七杀星·南斗度厄", 1, ["初始注册权益"]),
@@ -146,7 +146,7 @@ def members_by_tier(db: Session = Depends(get_db),
 
 @router.post("/members")
 def create_member(body: MemberRegisterIn, db: Session = Depends(get_db),
-                  _: AdminUser = Depends(get_current_admin)):
+                  _: AdminUser = Depends(get_admin_or_agent)):
     if db.query(Member).filter(Member.phone == body.phone).first():
         raise HTTPException(status_code=400, detail="手机号已存在")
     m = Member(
@@ -203,7 +203,7 @@ def create_member(body: MemberRegisterIn, db: Session = Depends(get_db),
 
 @router.put("/members/{mid}")
 def update_member(mid: int, body: MemberUpdateIn, db: Session = Depends(get_db),
-                  _: AdminUser = Depends(get_current_admin)):
+                  _: AdminUser = Depends(get_admin_or_agent)):
     m = db.query(Member).filter(Member.id == mid).first()
     if not m:
         raise HTTPException(status_code=404, detail="学员不存在")
@@ -217,7 +217,7 @@ def update_member(mid: int, body: MemberUpdateIn, db: Session = Depends(get_db),
 
 @router.get("/members/{mid}")
 def member_detail(mid: int, db: Session = Depends(get_db),
-                  _: AdminUser = Depends(get_current_admin)):
+                  _: AdminUser = Depends(get_admin_or_agent)):
     m = db.query(Member).filter(Member.id == mid).first()
     if not m:
         raise HTTPException(status_code=404, detail="学员不存在")
@@ -226,7 +226,7 @@ def member_detail(mid: int, db: Session = Depends(get_db),
 
 @router.delete("/members/{mid}")
 def delete_member(mid: int, db: Session = Depends(get_db),
-                 admin: AdminUser = Depends(get_current_admin)):
+                 admin: AdminUser = Depends(get_admin_or_agent)):
     m = db.query(Member).filter(Member.id == mid).first()
     if not m:
         raise HTTPException(status_code=404, detail="学员不存在")
@@ -275,7 +275,7 @@ def delete_member(mid: int, db: Session = Depends(get_db),
 # ---------- 缴费 ----------
 @router.post("/payments")
 def create_payment(body: PaymentCreateIn, db: Session = Depends(get_db),
-                   _: AdminUser = Depends(get_current_admin)):
+                   _: AdminUser = Depends(get_admin_or_agent)):
     m = db.query(Member).filter(Member.id == body.member_id).first()
     if not m:
         raise HTTPException(status_code=404, detail="学员不存在")
@@ -292,12 +292,26 @@ def create_payment(body: PaymentCreateIn, db: Session = Depends(get_db),
         pay_method=body.pay_method,
         pay_type=body.pay_type,
         pay_status=body.pay_status,
-        pay_time=datetime.utcnow() if body.pay_status in ("paid", "partial") else None,
+        pay_time=datetime.strptime(body.pay_date, "%Y-%m-%d") if body.pay_date else (datetime.utcnow() if body.pay_status in ("paid", "partial") else None),
         due_date=date.fromisoformat(body.due_date) if body.due_date else None,
+        receipt_image=body.receipt_image,
         remark=body.remark,
     )
     db.add(p)
     db.flush()  # 获取 p.id
+
+    # ── 写入 payment_services 关联表（多选合作项目）──
+    all_sids = []
+    if body.service_ids:
+        all_sids = [int(sid) for sid in body.service_ids if sid]
+    elif body.service_id:
+        all_sids = [body.service_id]
+    for sid in all_sids:
+        db.add(PaymentService(payment_id=p.id, service_id=sid))
+    # 兼容：service_id 存第一个
+    if all_sids and not p.service_id:
+        p.service_id = all_sids[0]
+    db.flush()
 
     # ── auto_create_package: 自动创建/关联 ServicePackage ──
     # 年费制：年费总额 / 服务次数 = 每次扣费额
@@ -372,7 +386,7 @@ def create_payment(body: PaymentCreateIn, db: Session = Depends(get_db),
 def list_payments(
     member_id: Optional[int] = None,
     db: Session = Depends(get_db),
-    _: AdminUser = Depends(get_current_admin),
+    _: AdminUser = Depends(get_admin_or_agent),
 ):
     q = db.query(Payment)
     if member_id:
@@ -381,7 +395,9 @@ def list_payments(
 
     # 关联查询学员和老师名称
     member_ids = list({p.member_id for p in payments if p.member_id})
-    consultant_ids = list({p.consultant_id for p in payments if p.consultant_id})
+    # 收集归属顾问ID（从member取）
+    _members_for_cids = {m.id: m for m in db.query(Member).filter(Member.id.in_(list({p.member_id for p in payments if p.member_id}))).all()} if payments else {}
+    consultant_ids = list({_members_for_cids[p.member_id].consultant_id for p in payments if p.member_id and p.member_id in _members_for_cids and _members_for_cids[p.member_id].consultant_id})
     members_map = {m.id: m for m in db.query(Member).filter(Member.id.in_(member_ids)).all()} if member_ids else {}
     consultants_map = {c.id: c for c in db.query(Consultant).filter(Consultant.id.in_(consultant_ids)).all()} if consultant_ids else {}
 
@@ -393,12 +409,24 @@ def list_payments(
         brs = db.query(Branch).filter(Branch.id.in_(branch_ids)).all()
         branch_map = {b.id: b.short_name or b.name for b in brs}
 
-    # 关联合作项目
-    service_ids = list({p.service_id for p in payments if p.service_id})
+    # 关联合作项目（支持多选）
+    payment_ids = [p.id for p in payments]
+    ps_rows = db.query(PaymentService).filter(PaymentService.payment_id.in_(payment_ids)).all() if payment_ids else []
+    # payment_id -> [service_id, ...]
+    ps_map = {}
+    for ps in ps_rows:
+        ps_map.setdefault(ps.payment_id, []).append(ps.service_id)
+    # 收集所有 service_id（含旧的单选字段）
+    all_service_ids = set()
+    for p in payments:
+        if p.service_id:
+            all_service_ids.add(p.service_id)
+        for sid in ps_map.get(p.id, []):
+            all_service_ids.add(sid)
     service_map = {}
-    if service_ids:
-        svcs = db.query(Service).filter(Service.id.in_(service_ids)).all()
-        service_map = {s.id: s.name for s in svcs}
+    if all_service_ids:
+        svcs = db.query(Service).filter(Service.id.in_(list(all_service_ids))).all()
+        service_map = {s.id: s for s in svcs}
 
     # 关联套餐（扣费明细）
     package_ids = list({p.package_id for p in payments if p.package_id})
@@ -411,13 +439,23 @@ def list_payments(
     for p in payments:
         d = to_dict(p)
         m = members_map.get(p.member_id)
-        c = consultants_map.get(p.consultant_id) if p.consultant_id else None
+        # 收款归属 = 客户归属顾问（member.consultant_id），而非录入人
+        c = consultants_map.get(m.consultant_id) if m and m.consultant_id else None
         d['member_name'] = m.name if m else ''
         d['enterprise_name'] = getattr(m, 'enterprise_name', '') if m else ''
         d['member_phone'] = m.phone if m else ''
         d['consultant_name'] = c.name if c else ''
         d['branch_name'] = branch_map.get(p.branch_id, '') if p.branch_id else ''
-        d['service_name'] = service_map.get(p.service_id, '') if p.service_id else ''
+        # 多选合作项目
+        sids = ps_map.get(p.id, [])
+        if not sids and p.service_id:
+            sids = [p.service_id]
+        svc_names = [service_map[sid].name for sid in sids if sid in service_map]
+        svc_categories = [service_map[sid].category for sid in sids if sid in service_map]
+        d['service_name'] = ' + '.join(svc_names) if svc_names else ''
+        d['service_names'] = svc_names
+        d['service_categories'] = svc_categories
+        d['service_ids'] = sids
         # 套餐扣费明细
         pkg = package_map.get(p.package_id) if p.package_id else None
         if pkg:
@@ -440,10 +478,31 @@ def list_payments(
     return ok(result)
 
 
+# ---------- 删除缴费记录（仅超级管理员）----------
+@router.delete("/payments/{payment_id}")
+def delete_payment(payment_id: int, db: Session = Depends(get_db),
+                   admin: AdminUser = Depends(get_current_admin)):
+    if admin.role != "super_admin":
+        raise HTTPException(status_code=403, detail="仅超级管理员可删除缴费记录")
+    p = db.query(Payment).filter(Payment.id == payment_id).first()
+    if not p:
+        raise HTTPException(status_code=404, detail="缴费记录不存在")
+    # 删除关联的 payment_services
+    db.query(PaymentService).filter(PaymentService.payment_id == payment_id).delete()
+    # 删除关联的套餐
+    if p.package_id:
+        pkg = db.query(ServicePackage).filter(ServicePackage.id == p.package_id).first()
+        if pkg:
+            db.delete(pkg)
+    db.delete(p)
+    db.commit()
+    return ok({"deleted": payment_id})
+
+
 # ---------- 顾问 ----------
 @router.get("/consultants")
 def list_consultants(db: Session = Depends(get_db),
-                     _: AdminUser = Depends(get_current_admin)):
+                     _: AdminUser = Depends(get_admin_or_agent)):
     from models.branch import Branch
     rows = db.query(Consultant).order_by(Consultant.id.asc()).all()
     # 批量查分公司名
@@ -452,10 +511,15 @@ def list_consultants(db: Session = Depends(get_db),
     if branch_ids:
         branches = db.query(Branch).filter(Branch.id.in_(branch_ids)).all()
         branch_map = {b.id: b.short_name or b.name for b in branches}
+    # 批量查推荐人/带教人名
+    all_ids = list({c.id for c in rows})
+    name_map = {c.id: c.name for c in rows}
     result = []
     for c in rows:
         d = to_dict(c)
         d['branch_name'] = branch_map.get(c.branch_id, '') if c.branch_id else ''
+        d['referrer_name'] = name_map.get(c.referrer_id, '') if c.referrer_id else ''
+        d['mentor_name'] = name_map.get(c.mentor_id, '') if c.mentor_id else ''
         # 解析 service_modules JSON → service_ids 列表
         import json as _j
         try:
@@ -468,7 +532,7 @@ def list_consultants(db: Session = Depends(get_db),
 
 @router.post("/consultants")
 def create_consultant(body: ConsultantIn, db: Session = Depends(get_db),
-                      current: AdminUser = Depends(get_current_admin)):
+                      current: AdminUser = Depends(get_admin_or_agent)):
     # 管理员只能新增本公司顾问
     role = getattr(current, 'role', 'admin')
     if role != 'super_admin':
@@ -501,7 +565,7 @@ def create_consultant(body: ConsultantIn, db: Session = Depends(get_db),
 
 @router.put("/consultants/{cid}")
 def update_consultant(cid: int, body: ConsultantIn, db: Session = Depends(get_db),
-                      current: AdminUser = Depends(get_current_admin)):
+                      current: AdminUser = Depends(get_admin_or_agent)):
     c = db.query(Consultant).filter(Consultant.id == cid).first()
     if not c:
         raise HTTPException(status_code=404, detail="顾问不存在")
@@ -523,7 +587,7 @@ def update_consultant(cid: int, body: ConsultantIn, db: Session = Depends(get_db
 
 @router.delete("/consultants/{cid}")
 def delete_consultant(cid: int, db: Session = Depends(get_db),
-                      current: AdminUser = Depends(get_current_admin)):
+                      current: AdminUser = Depends(get_admin_or_agent)):
     c = db.query(Consultant).filter(Consultant.id == cid).first()
     if not c:
         raise HTTPException(status_code=404, detail="顾问不存在")
@@ -608,6 +672,27 @@ def batch_create_schedule(
     assistant_id = body.get('assistant_id')  # 助理老师
     member_id = body.get('member_id')        # 客户/会员
     service_id = body.get('service_id')      # 服务项目
+
+    # -- 客户冲突检测：同一客户同时间不能约两个不同老师 --
+    if member_id and dates and stype == "busy":
+        from models.service import ServiceOrder as SO2
+        for d_str in dates:
+            conflict = (
+                db.query(SO2)
+                .join(ConsultantSchedule, (ConsultantSchedule.order_id == SO2.id) & (ConsultantSchedule.schedule_date == date.fromisoformat(d_str)))
+                .filter(
+                    SO2.member_id == member_id,
+                    SO2.consultant_id != cid,
+                    SO2.status.notin_(["cancelled", "completed"]),
+                )
+                .first()
+            )
+            if conflict:
+                c_name = ""
+                c_obj = db.query(Consultant).filter(Consultant.id == conflict.consultant_id).first()
+                if c_obj:
+                    c_name = c_obj.name
+                raise HTTPException(400, f"客户在 {d_str} 已由老师 {c_name} 服务(工单#{conflict.id}), 不可同时预约其他老师")
 
     # 如果是 busy 排期且没关联工单 → 自动创建工单
     auto_order = None
@@ -776,7 +861,7 @@ def list_operation_logs(
 # ---------- 看板 ----------
 @router.get("/dashboard")
 def dashboard(db: Session = Depends(get_db),
-              _: AdminUser = Depends(get_current_admin)):
+              _: AdminUser = Depends(get_admin_or_agent)):
     today = date.today()
     y, mo = today.year, today.month
 
@@ -894,7 +979,7 @@ def dashboard_v2(
     year: int = None,
     month: int = None,
     db: Session = Depends(get_db),
-    _: AdminUser = Depends(get_current_admin),
+    _: AdminUser = Depends(get_admin_or_agent),
 ):
     """CRM 完整数据看板
     四大模块：会员/学员 · 老师 · 财务 · 数据分析
@@ -1289,13 +1374,13 @@ def dashboard_v2(
 
 @router.get("/stats/menu-badges")
 def menu_badges(db: Session = Depends(get_db),
-                _: AdminUser = Depends(get_current_admin)):
+                _: AdminUser = Depends(get_admin_or_agent)):
     """返回侧栏菜单徽标数字"""
     from models.service import ServiceOrder
     from models.course_session import CourseSession
     import datetime
 
-    # 预约管理 - 待确认
+    # 预约管理 - 仅 pending（未确认的新预约）
     pending_bookings = (
         db.query(func.count(VisitBooking.id))
         .filter(VisitBooking.status == "pending")
@@ -1307,24 +1392,33 @@ def menu_badges(db: Session = Depends(get_db),
         .filter(VisitReward.status == "available")
         .scalar() or 0
     )
-    # 服务工单 - 进行中
+    # 服务工单 - 待接单（红）
+    try:
+        pending_orders = (
+            db.query(func.count(ServiceOrder.id))
+            .filter(ServiceOrder.status.in_(["pending", "confirmed"]))
+            .scalar() or 0
+        )
+    except:
+        pending_orders = 0
+    # 服务工单 - 进行中（绿）
     try:
         active_orders = (
             db.query(func.count(ServiceOrder.id))
-            .filter(ServiceOrder.status.in_(["pending", "accepted", "confirmed", "in_progress"]))
+            .filter(ServiceOrder.status.in_(["accepted", "in_progress", "preparing", "reporting", "follow_up"]))
             .scalar() or 0
         )
     except:
         active_orders = 0
-    # 课程场次 - 报名中
+    # 课程场次 - 待确认报名（红）
     try:
-        active_sessions = (
+        pending_sessions = (
             db.query(func.count(CourseSession.id))
             .filter(CourseSession.status == "open")
             .scalar() or 0
         )
     except:
-        active_sessions = 0
+        pending_sessions = 0
     # 老师排期 - 进行中/已确认
     try:
         active_schedules = (
@@ -1334,16 +1428,17 @@ def menu_badges(db: Session = Depends(get_db),
         )
     except:
         active_schedules = 0
-    # 会员 - 7天内新注册
+    # 会员 - 不显示角标（信息类，非待办）
+    new_members = 0
+    # 权益台账 - 待确认发放的（非已激活）
     try:
-        seven_days_ago = datetime.datetime.now() - datetime.timedelta(days=7)
-        new_members = (
-            db.query(func.count(Member.id))
-            .filter(Member.created_at >= seven_days_ago)
+        pending_rewards_action = (
+            db.query(func.count(VisitReward.id))
+            .filter(VisitReward.status == "pending")
             .scalar() or 0
         )
     except:
-        new_members = 0
+        pending_rewards_action = 0
     # 老师审核 - 待审核
     try:
         pending_approval = (
@@ -1355,10 +1450,12 @@ def menu_badges(db: Session = Depends(get_db),
         pending_approval = 0
     return ok({
         "bookings": int(pending_bookings),
-        "rewards": int(pending_rewards),
-        "service-orders": int(active_orders),
-        "course-sessions": int(active_sessions),
-        "schedules": int(active_schedules),
+        "rewards": int(pending_rewards_action),
+        "service-orders": int(pending_orders),
+        "service-orders-active": int(active_orders),
+        "course-sessions": int(pending_sessions),
+        "schedules": 0,
+        "schedules-active": int(active_schedules),
         "members": int(new_members),
         "consultant-approval": int(pending_approval),
     })
@@ -1527,7 +1624,7 @@ def disable_user(
 def list_branches(
     status: Optional[str] = None,
     db: Session = Depends(get_db),
-    _: AdminUser = Depends(get_current_admin),
+    _: AdminUser = Depends(get_admin_or_agent),
 ):
     q = db.query(Branch)
     if status:
@@ -1540,7 +1637,7 @@ def list_branches(
 def create_branch(
     body: dict,
     db: Session = Depends(get_db),
-    _: AdminUser = Depends(get_current_admin),
+    _: AdminUser = Depends(get_admin_or_agent),
 ):
     b = Branch(
         name=body.get('name', ''),
@@ -1564,7 +1661,7 @@ def update_branch(
     bid: int,
     body: dict,
     db: Session = Depends(get_db),
-    _: AdminUser = Depends(get_current_admin),
+    _: AdminUser = Depends(get_admin_or_agent),
 ):
     b = db.query(Branch).filter(Branch.id == bid).first()
     if not b:
@@ -1581,7 +1678,7 @@ def update_branch(
 def delete_branch(
     bid: int,
     db: Session = Depends(get_db),
-    _: AdminUser = Depends(get_current_admin),
+    _: AdminUser = Depends(get_admin_or_agent),
 ):
     b = db.query(Branch).filter(Branch.id == bid).first()
     if not b:
@@ -1597,7 +1694,7 @@ def operation_logs(
     page: int = Query(1, ge=1),
     size: int = Query(50, ge=1, le=200),
     db: Session = Depends(get_db),
-    _: AdminUser = Depends(get_current_admin),
+    _: AdminUser = Depends(get_admin_or_agent),
 ):
     total = db.execute(text("SELECT count(*) FROM operation_logs")).scalar() or 0
     rows = db.execute(text(
@@ -1618,7 +1715,7 @@ def recycle_bin(
     size: int = Query(50, ge=1, le=200),
     target_type: str = Query(""),
     db: Session = Depends(get_db),
-    _: AdminUser = Depends(get_current_admin),
+    _: AdminUser = Depends(get_admin_or_agent),
 ):
     where = ""
     params: dict = {"lim": size, "off": (page - 1) * size}
@@ -1642,7 +1739,7 @@ def recycle_bin(
 def recycle_restore(
     rid: int,
     db: Session = Depends(get_db),
-    admin: AdminUser = Depends(get_current_admin),
+    admin: AdminUser = Depends(get_admin_or_agent),
 ):
     row = db.execute(text("SELECT * FROM recycle_bin WHERE id = :rid"), {"rid": rid}).mappings().first()
     if not row:
@@ -1671,3 +1768,187 @@ def recycle_restore(
         "det": f"从回收站恢复「{row['target_name']}」"})
     db.commit()
     return ok({"restored": rid})
+
+
+# ──────────── 老师月度统计 ────────────
+@router.get("/consultants/{cid}/monthly-stats")
+def consultant_monthly_stats(
+    cid: int,
+    year: int = None,
+    month: int = None,
+    db: Session = Depends(get_db),
+    _: AdminUser = Depends(get_admin_or_agent)
+):
+    """查询老师月度统计数据"""
+    import datetime
+    from models.service import ServiceOrder
+    from sqlalchemy import and_
+
+    now = datetime.date.today()
+    if not year:
+        year = now.year
+    if not month:
+        month = now.month
+
+    c = db.query(Consultant).filter(Consultant.id == cid).first()
+    if not c:
+        raise HTTPException(404, "老师不存在")
+
+    first_day = datetime.date(year, month, 1)
+    if month == 12:
+        last_day = datetime.date(year + 1, 1, 1)
+    else:
+        last_day = datetime.date(year, month + 1, 1)
+
+    # 主案出差天数：service_orders 中作为主顾问、本月排期日
+    try:
+        main_days = (
+            db.query(func.count(func.distinct(ServiceOrder.appoint_date)))
+            .filter(
+                ServiceOrder.consultant_id == cid,
+                ServiceOrder.appoint_date >= first_day,
+                ServiceOrder.appoint_date < last_day,
+                ServiceOrder.status.notin_([cancelled, rejected]),
+            ).scalar() or 0
+        )
+    except:
+        main_days = 0
+
+    # 助理出差天数
+    try:
+        assist_days = (
+            db.query(func.count(func.distinct(ServiceOrder.appoint_date)))
+            .filter(
+                ServiceOrder.assistant_id == cid,
+                ServiceOrder.appoint_date >= first_day,
+                ServiceOrder.appoint_date < last_day,
+                ServiceOrder.status.notin_([cancelled, rejected]),
+            ).scalar() or 0
+        )
+    except:
+        assist_days = 0
+
+    # 归属会员数
+    from models.member import Member
+    try:
+        member_count = (
+            db.query(func.count(Member.id))
+            .filter(Member.consultant_id == cid)
+            .scalar() or 0
+        )
+    except:
+        member_count = 0
+
+    # 正在跟进客户数
+    try:
+        active_clients = (
+            db.query(func.count(func.distinct(ServiceOrder.member_id)))
+            .filter(
+                ServiceOrder.consultant_id == cid,
+                ServiceOrder.status.in_([accepted, in_progress, preparing, reporting, follow_up]),
+            ).scalar() or 0
+        )
+    except:
+        active_clients = 0
+
+    # 主案服务客户数（本月）
+    try:
+        main_clients = (
+            db.query(func.count(func.distinct(ServiceOrder.member_id)))
+            .filter(
+                ServiceOrder.consultant_id == cid,
+                ServiceOrder.created_at >= first_day,
+                ServiceOrder.created_at < last_day,
+            ).scalar() or 0
+        )
+    except:
+        main_clients = 0
+
+    # 助理服务客户数（本月）
+    try:
+        assist_clients = (
+            db.query(func.count(func.distinct(ServiceOrder.member_id)))
+            .filter(
+                ServiceOrder.assistant_id == cid,
+                ServiceOrder.created_at >= first_day,
+                ServiceOrder.created_at < last_day,
+            ).scalar() or 0
+        )
+    except:
+        assist_clients = 0
+
+    # 销售额（pay_type=sale, pay_status=completed）
+    from models.member import Payment
+    try:
+        sales = float(
+            db.query(func.coalesce(func.sum(Payment.amount), 0))
+            .filter(
+                Payment.consultant_id == cid,
+                Payment.pay_type == "sale",
+                Payment.pay_status == "completed",
+                Payment.created_at >= first_day,
+                Payment.created_at < last_day,
+            ).scalar() or 0
+        )
+    except:
+        sales = 0.0
+
+    # 消耗额
+    try:
+        consumption = float(
+            db.query(func.coalesce(func.sum(Payment.amount), 0))
+            .filter(
+                Payment.consultant_id == cid,
+                Payment.pay_type == "consumption",
+                Payment.pay_status == "completed",
+                Payment.created_at >= first_day,
+                Payment.created_at < last_day,
+            ).scalar() or 0
+        )
+    except:
+        consumption = 0.0
+
+    # 课程报名人数（本月该老师名下的报名数）
+    from models.course_session import CourseEnrollment, CourseSession
+    try:
+        course_enrolled = (
+            db.query(func.count(CourseEnrollment.id))
+            .filter(
+                CourseEnrollment.consultant_id == cid,
+                CourseEnrollment.created_at >= first_day,
+                CourseEnrollment.created_at < last_day,
+            ).scalar() or 0
+        )
+    except:
+        course_enrolled = 0
+
+    # 参加课程人数（本月该老师名下、已签到/已完成的）
+    try:
+        course_attended = (
+            db.query(func.count(CourseEnrollment.id))
+            .filter(
+                CourseEnrollment.consultant_id == cid,
+                CourseEnrollment.created_at >= first_day,
+                CourseEnrollment.created_at < last_day,
+                CourseEnrollment.status.in_([checked_in, completed, follow_up, closed]),
+            ).scalar() or 0
+        )
+    except:
+        course_attended = 0
+
+    return ok({
+        "consultant_id": cid,
+        "consultant_name": c.name,
+        "year": year,
+        "month": month,
+        "main_days": int(main_days),
+        "assist_days": int(assist_days),
+        "member_count": int(member_count),
+        "active_clients": int(active_clients),
+        "main_clients": int(main_clients),
+        "assist_clients": int(assist_clients),
+        "sales": sales,
+        "consumption": consumption,
+        "course_enrolled": int(course_enrolled),
+        "course_attended": int(course_attended),
+    })
