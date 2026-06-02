@@ -196,4 +196,16 @@ export const API = {
   courseEnrollmentPay: (id: number, data: any) => http.put(`/admin/course-sessions/enrollments/${id}/pay`, data),
   courseEnrollmentDeal: (id: number, data: any) => http.put(`/admin/course-sessions/enrollments/${id}/deal`, data),
   courseEnrollmentFollowup: (id: number, data: any) => http.post(`/admin/course-sessions/enrollments/${id}/followup`, data),
+
+  // 采购管理
+  purchaseList: (params?: any) => http.get('/admin/purchases', { params: params || {} }),
+  purchaseCreate: (body: any) => http.post('/admin/purchases', body),
+  purchaseUpdate: (id: number, body: any) => http.put(`/admin/purchases/${id}`, body),
+  purchaseDelete: (id: number) => http.delete(`/admin/purchases/${id}`),
+
+  // 会员储值
+  memberRecharges: (memberId: number) => http.get(`/admin/members/${memberId}/recharges`),
+  rechargeCreate: (body: any) => http.post('/admin/recharges', body),
+  rechargeConsume: (id: number, body: any) => http.post(`/admin/recharges/${id}/consume`, body),
+  rechargeConsumptions: (id: number) => http.get(`/admin/recharges/${id}/consumptions`),
 };

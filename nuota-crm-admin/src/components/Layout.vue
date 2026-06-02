@@ -30,6 +30,12 @@ const menuGroups = [
     ],
   },
   {
+    label: '采购管理', icon: 'Box',
+    items: [
+      { path: '/purchases', title: '采购管理', icon: 'Box', adminOnly: true },
+    ],
+  },
+  {
     label: '会员运营', icon: 'UserFilled',
     items: [
       { path: '/customers', title: '客户管理', icon: 'OfficeBuilding' },

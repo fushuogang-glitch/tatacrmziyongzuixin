@@ -34,6 +34,7 @@ const routes: RouteRecordRaw[] = [
   { path: '/salary', component: () => import('../views/salary/SalaryManage.vue'), meta: { title: '工资管理' } },
   { path: '/promotion', component: () => import('../views/promotion/PromotionManage.vue'), meta: { title: '晋级管理' } },
   { path: '/banners', component: () => import('../views/banners/BannerManage.vue'), meta: { title: '广告位管理' } },
+  { path: '/purchases', component: () => import('../views/purchases/PurchaseList.vue'), meta: { title: '采购管理' } },
 ];
 
 const router = createRouter({ history: createWebHashHistory(), routes });

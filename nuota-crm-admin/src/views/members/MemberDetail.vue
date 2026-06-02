@@ -4,6 +4,7 @@ import { useRoute, useRouter } from 'vue-router';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { API } from '../../api';
 import { useUserStore } from '../../store/user';
+import MemberRechargeBlock from './MemberRechargeBlock.vue';
 
 const route = useRoute();
 const router = useRouter();
@@ -294,6 +295,9 @@ onMounted(() => {
         <el-table-column prop="remark" label="备注" />
       </el-table>
     </el-card>
+
+    <!-- 储值 -->
+    <MemberRechargeBlock :member-id="id" style="margin-bottom: 16px;" />
 
     <!-- 客户跟进记录 -->
     <el-card v-loading="fuLoading">
