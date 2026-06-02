@@ -11,11 +11,15 @@
       <view class="row"><text>入学日期</text><text>{{ user?.enroll_date || '-' }}</text></view>
       <view class="row"><text>到期日期</text><text>{{ user?.expire_date || '-' }}</text></view>
       <view class="row"><text>推荐码</text><text class="code">{{ user?.referral_code || '-' }}</text></view>
+      <!-- 人脸绑定暂时隐藏
       <view class="row"><text>人脸绑定</text><text :class="user?.face_bound ? 'ok':'no'">{{ user?.face_bound ? '已绑定':'未绑定' }}</text></view>
+      -->
     </view>
 
     <view class="btns">
+      <!-- 人脸绑定暂时隐藏
       <view class="btn-primary" @tap="bindFace" v-if="!user?.face_bound">去绑定人脸</view>
+      -->
       <view class="btn-ghost" @tap="logout">退出登录</view>
     </view>
   </view>

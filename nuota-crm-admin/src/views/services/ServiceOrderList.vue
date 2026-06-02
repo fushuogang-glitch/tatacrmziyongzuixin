@@ -17,12 +17,24 @@
 
     <el-table :data="rows" v-loading="loading" stripe @row-click="goDetail">
       <el-table-column prop="order_no" label="工单号" width="180" />
-      <el-table-column prop="member_id" label="会员ID" width="80" />
-      <el-table-column prop="service_id" label="服务" width="80" />
+      <el-table-column label="会员" min-width="120">
+        <template #default="{ row }">
+          {{ row.member_name || row.member_id || '—' }}
+        </template>
+      </el-table-column>
+      <el-table-column label="服务" min-width="140">
+        <template #default="{ row }">
+          {{ row.service_name || row.service_id || '—' }}
+        </template>
+      </el-table-column>
       <el-table-column prop="appoint_date" label="预约日期" width="120" />
-      <el-table-column prop="appoint_time" label="时段" width="120" />
-      <el-table-column prop="store_name" label="门店" min-width="150" />
-      <el-table-column prop="consultant_id" label="老师" width="80" />
+      <el-table-column prop="appoint_time" label="时段" width="100" />
+      <el-table-column prop="store_name" label="门店" min-width="120" />
+      <el-table-column label="主案老师" width="100">
+        <template #default="{ row }">
+          {{ row.consultant_name || '—' }}
+        </template>
+      </el-table-column>
       <el-table-column prop="workflow_stage" label="当前阶段" width="120" />
       <el-table-column label="进度" width="120">
         <template #default="{ row }">

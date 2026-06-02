@@ -11,7 +11,7 @@
         <text class="hero-en">COURSES</text>
         <text class="hero-cn">年 度 课 程</text>
         <view class="hero-line"></view>
-        <text class="hero-desc">新美业系统培训 · 现场扫脸签到 · 年费制服务</text>
+        <text class="hero-desc">新美业系统培训 · 年费制服务</text>
       </view>
 
       <view v-if="loading" class="loading-wrap">
@@ -125,7 +125,7 @@ const loading = ref(true);
 const highlights = [
   { icon: '🎯', title: '系统方法论', desc: '塔塔核心体系\n黄金三角·三多' },
   { icon: '👥', title: '现场互动', desc: '案例研讨\n实操演练' },
-  { icon: '📋', title: '手册随行', desc: '专属课程手册\n扫脸获取Day1-3' },
+  { icon: '📋', title: '手册随行', desc: '专属课程手册\n现场领取Day1-3' },
   { icon: '🔗', title: '持续支持', desc: '课后老师群\n下店辅导资格' },
 ];
 

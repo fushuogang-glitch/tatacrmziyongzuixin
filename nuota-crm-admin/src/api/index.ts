@@ -14,6 +14,15 @@ export const API = {
 
   // 学员
   memberList: (params: any) => http.get('/admin/members', { params }),
+  // 客户管理面板（卡片视图）
+  customerList: (params?: any) => http.get('/admin/customers', { params: params || {} }),
+  customerFilters: () => http.get('/admin/customers/filters'),
+  customerStats: () => http.get('/admin/customers/stats'),
+  customerCreate: (body: any) => http.post('/admin/customers', body),
+  customerUpdate: (id: number, body: any) => http.put(`/admin/customers/${id}`, body),
+  phoneGrantApply: (body: any) => http.post('/admin/customers/phone-grant/apply', body),
+  phoneGrantPending: () => http.get('/admin/customers/phone-grant/pending'),
+  phoneGrantReview: (body: any) => http.post('/admin/customers/phone-grant/review', body),
   memberCreate: (body: any) => http.post('/admin/members', body),
   memberUpdate: (id: number, body: any) => http.put(`/admin/members/${id}`, body),
   memberDetail: (id: number) => http.get(`/admin/members/${id}`),
@@ -21,6 +30,7 @@ export const API = {
 
   // 缴费
   paymentCreate: (body: any) => http.post('/admin/payments', body),
+  paymentDelete: (id: number) => http.delete(`/admin/payments/${id}`),
   paymentList: (member_id?: number) =>
     http.get('/admin/payments', { params: member_id ? { member_id } : {} }),
   consumptionList: (params?: any) =>
@@ -62,6 +72,13 @@ export const API = {
   consultantList: () => http.get('/admin/consultants'),
   consultantCreate: (body: any) => http.post('/admin/consultants', body),
   consultantUpdate: (id: number, body: any) => http.put(`/admin/consultants/${id}`, body),
+
+  // 文件上传
+  uploadImage: (file: File) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    return http.post('/admin/upload/image', formData, { headers: { 'Content-Type': 'multipart/form-data' } });
+  },
 
   // 老师排期
   scheduleList: (params: { consultant_id?: number; year?: number; month?: number } = {}) =>

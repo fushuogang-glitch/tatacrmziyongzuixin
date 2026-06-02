@@ -45,8 +45,18 @@ onMounted(load);
       </div>
       <el-table :data="rows" v-loading="loading" stripe style="margin-top: 16px;">
         <el-table-column prop="id" label="ID" width="80" />
-        <el-table-column prop="referrer_id" label="推荐人ID" width="100" />
-        <el-table-column prop="referee_id" label="被推荐人ID" width="110" />
+        <el-table-column label="推荐人" min-width="160">
+          <template #default="{ row }">
+            <div>{{ row.referrer_name || '-' }}</div>
+            <div style="font-size:12px;color:#999">{{ row.referrer_phone || '' }}</div>
+          </template>
+        </el-table-column>
+        <el-table-column label="被推荐人" min-width="160">
+          <template #default="{ row }">
+            <div>{{ row.referee_name || '-' }}</div>
+            <div style="font-size:12px;color:#999">{{ row.referee_phone || '' }}</div>
+          </template>
+        </el-table-column>
         <el-table-column label="状态" width="120">
           <template #default="{ row }"><el-tag :type="statusTag(row.status)">{{ row.status }}</el-tag></template>
         </el-table-column>

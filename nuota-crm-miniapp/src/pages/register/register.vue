@@ -226,7 +226,8 @@ async function submit() {
     uni.showToast({ title: msg, icon: 'success', duration: 1500 });
 
     setTimeout(() => {
-      uni.redirectTo({ url: '/pages/face/bind/bind' });
+      // 人脸绑定暂时隐藏，直接跳转会员中心
+      uni.switchTab({ url: '/pages/member/index' });
     }, 1500);
   } catch (_) { /* 已 toast */ }
   finally { uni.hideLoading(); }

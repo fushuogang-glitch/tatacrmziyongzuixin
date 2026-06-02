@@ -1,7 +1,11 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref, computed } from 'vue';
-import { ElMessage } from 'element-plus';
+import { ElMessage, ElMessageBox } from 'element-plus';
 import { API } from '../../api';
+import { useUserStore } from '../../store/user';
+
+const user = useUserStore();
+const isSuperAdmin = computed(() => user.role === 'super_admin');
 
 const rows = ref<any[]>([]);
 const consumptions = ref<any[]>([]);
@@ -41,6 +45,16 @@ async function load() {
     consumptions.value = c || [];
   } finally {
     loading.value = false;
+  }
+}
+
+async function deletePayment(id: number) {
+  try {
+    await API.paymentDelete(id);
+    ElMessage.success('删除成功');
+    load();
+  } catch (e: any) {
+    ElMessage.error(e?.msg || e?.detail || '删除失败');
   }
 }
 
@@ -317,6 +331,16 @@ onMounted(load);
       </el-table-column>
 
       <el-table-column prop="remark" label="备注" min-width="120" />
+
+      <el-table-column label="操作" width="80" fixed="right" v-if="isSuperAdmin">
+        <template #default="{ row }">
+          <el-popconfirm title="确认删除这笔缴费记录？删除后不可恢复！" confirm-button-text="删除" cancel-button-text="取消" @confirm="deletePayment(row.id)">
+            <template #reference>
+              <el-button type="danger" size="small" plain>删除</el-button>
+            </template>
+          </el-popconfirm>
+        </template>
+      </el-table-column>
     </el-table>
   </div>
 </template>

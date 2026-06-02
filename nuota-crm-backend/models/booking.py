@@ -19,6 +19,10 @@ class Consultant(Base):
     monthly_days = Column(Integer, default=14)
     course_days = Column(Integer, default=8)
     status = Column(String(20), default="active")
+    level = Column(String(30), default="trainee")
+    branch_id = Column(Integer, ForeignKey('branches.id'), index=True)
+    referral_code = Column(String(20), unique=True, index=True)
+    avatar = Column(Text, nullable=True)  # 头像URL
     created_at = Column(DateTime, server_default=func.now())
 
 

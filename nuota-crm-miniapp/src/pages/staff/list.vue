@@ -5,7 +5,7 @@
       <text class="header-en">ENTERPRISE STAFF</text>
       <text class="header-cn">企 业 学 员 管 理</text>
       <view class="header-line"></view>
-      <text class="header-desc">添加学员信息 · 人脸认证 · 参训管理</text>
+      <text class="header-desc">添加学员信息 · 参训管理</text>
     </view>
 
     <scroll-view scroll-y class="scroll">
@@ -15,6 +15,7 @@
           <text class="stat-num">{{ staffList.length }}</text>
           <text class="stat-label">学员总数</text>
         </view>
+      <!-- 人脸认证统计暂时隐藏
         <view class="stat-divider"></view>
         <view class="stat-item">
           <text class="stat-num">{{ faceBoundCount }}</text>
@@ -25,6 +26,7 @@
           <text class="stat-num">{{ staffList.length - faceBoundCount }}</text>
           <text class="stat-label">待认证</text>
         </view>
+      -->
       </view>
 
       <!-- 学员列表 -->
@@ -37,14 +39,14 @@
       <view v-for="s in staffList" :key="s.id" class="staff-card" @tap="viewStaff(s)">
         <view class="staff-avatar">
           <text class="avatar-text">{{ s.name?.charAt(0) || '?' }}</text>
-          <view v-if="s.face_bound" class="face-badge">✓</view>
+          <view v-if="s.face_bound" class="face-badge" style="display:none">✓</view>
         </view>
         <view class="staff-info">
           <text class="staff-name">{{ s.name }}</text>
           <text class="staff-pos">{{ s.position || '未设置职位' }}</text>
           <text class="staff-phone">{{ s.phone || '未填手机' }}</text>
         </view>
-        <view class="staff-actions">
+        <view class="staff-actions" style="display:none">
           <view v-if="!s.face_bound" class="face-btn" @tap.stop="goFaceBind(s)">
             <text class="face-btn-text">人脸认证</text>
           </view>
@@ -107,12 +109,14 @@
             <text class="detail-label">手机号</text>
             <text class="detail-value">{{ currentStaff?.phone || '未填写' }}</text>
           </view>
+          <!-- 人脸认证行暂时隐藏
           <view class="detail-row">
             <text class="detail-label">人脸认证</text>
             <text :class="['detail-value', currentStaff?.face_bound ? 'green' : 'red']">
               {{ currentStaff?.face_bound ? '已认证' : '未认证' }}
             </text>
           </view>
+          -->
           <view class="detail-row">
             <text class="detail-label">身份证</text>
             <text class="detail-value">{{ currentStaff?.id_card || '未填写' }}</text>

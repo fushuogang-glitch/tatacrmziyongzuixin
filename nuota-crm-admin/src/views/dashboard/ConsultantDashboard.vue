@@ -39,6 +39,23 @@ const tierColor: Record<string, string> = {
   primary: '#666', junior: '#7b6fdf', senior: '#4a90d9', college: '#c9a96e', teacher: '#e84c4c'
 };
 
+const promo = computed(() => data.value?.promotion_progress || null);
+const promoSalesPct = computed(() => {
+  if (!promo.value?.sales) return 0;
+  const { actual, target } = promo.value.sales;
+  return target > 0 ? Math.min(100, Math.round(actual / target * 100)) : 100;
+});
+const promoWorkDaysPct = computed(() => {
+  if (!promo.value?.work_days) return 0;
+  const { actual, target } = promo.value.work_days;
+  return target > 0 ? Math.min(100, Math.round(actual / target * 100)) : 100;
+});
+const promoMenteesPct = computed(() => {
+  if (!promo.value?.mentees) return 0;
+  const { actual, target } = promo.value.mentees;
+  return target > 0 ? Math.min(100, Math.round(actual / target * 100)) : 100;
+});
+
 onMounted(loadDashboard);
 </script>
 
@@ -95,6 +112,61 @@ onMounted(loadDashboard);
           <div class="sc-label">服务客户数</div>
           <div class="sc-sub">新客户 {{ ms.new_clients ?? 0 }} 位</div>
         </div>
+      </div>
+
+      <!-- 晋级进度 -->
+      <div class="section promo-section" v-if="promo">
+        <div class="section-title">🚀 晋级进度（{{ promo.year }}年度）</div>
+        <div class="promo-header">
+          <span class="promo-current">当前：<strong>{{ promo.current_level_name }}</strong></span>
+          <span class="promo-arrow">→</span>
+          <span class="promo-next">下一级：<strong>{{ promo.next_level_name }}</strong></span>
+        </div>
+        <div class="promo-bars" v-if="promo.next_level">
+          <!-- 销售额 -->
+          <div class="promo-bar-item">
+            <div class="pb-label">
+              <span>💰 年度销售</span>
+              <span class="pb-nums">
+                ¥{{ (promo.sales.actual / 10000).toFixed(1) }}万
+                <span class="pb-target">/ {{ (promo.sales.target / 10000).toFixed(0) }}万</span>
+                <span class="pb-gap" v-if="promo.sales.gap > 0">还差 {{ (promo.sales.gap / 10000).toFixed(1) }}万</span>
+                <span class="pb-done" v-else>✅ 达标</span>
+              </span>
+            </div>
+            <el-progress :percentage="promoSalesPct" :stroke-width="12" 
+              :color="promoSalesPct >= 100 ? '#67c23a' : '#409eff'" />
+          </div>
+          <!-- 执案天数 -->
+          <div class="promo-bar-item">
+            <div class="pb-label">
+              <span>📅 执案天数</span>
+              <span class="pb-nums">
+                {{ promo.work_days.actual }}天
+                <span class="pb-target">/ {{ promo.work_days.target }}天</span>
+                <span class="pb-gap" v-if="promo.work_days.gap > 0">还差 {{ promo.work_days.gap }}天</span>
+                <span class="pb-done" v-else>✅ 达标</span>
+              </span>
+            </div>
+            <el-progress :percentage="promoWorkDaysPct" :stroke-width="12" 
+              :color="promoWorkDaysPct >= 100 ? '#67c23a' : '#409eff'" />
+          </div>
+          <!-- 带队人数 -->
+          <div class="promo-bar-item" v-if="promo.mentees.target > 0">
+            <div class="pb-label">
+              <span>👥 带队人数</span>
+              <span class="pb-nums">
+                {{ promo.mentees.actual }}人
+                <span class="pb-target">/ {{ promo.mentees.target }}人</span>
+                <span class="pb-gap" v-if="promo.mentees.gap > 0">还差 {{ promo.mentees.gap }}人</span>
+                <span class="pb-done" v-else>✅ 达标</span>
+              </span>
+            </div>
+            <el-progress :percentage="promoMenteesPct" :stroke-width="12" 
+              :color="promoMenteesPct >= 100 ? '#67c23a' : '#409eff'" />
+          </div>
+        </div>
+        <div v-else class="promo-max">🌟 恭喜！您已达到最高级别！</div>
       </div>
 
       <!-- 年度城市足迹 -->
@@ -324,4 +396,20 @@ onMounted(loadDashboard);
 .cc-tier { font-size: 11px; font-weight: 600; flex-shrink: 0; }
 
 .empty-page { text-align: center; color: #bbb; padding: 80px 0; }
+
+/* 晋级进度 */
+.promo-section { border: 2px solid #f0e6d0; background: linear-gradient(135deg, #fffdf7, #fff); }
+.promo-header { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; font-size: 15px; }
+.promo-current { color: #666; }
+.promo-current strong { color: #c9a96e; font-size: 16px; }
+.promo-arrow { color: #ccc; font-size: 18px; }
+.promo-next strong { color: #409eff; font-size: 16px; }
+.promo-bars { display: flex; flex-direction: column; gap: 14px; }
+.promo-bar-item { }
+.pb-label { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; font-size: 13px; color: #333; }
+.pb-nums { font-weight: 600; }
+.pb-target { color: #909399; font-weight: 400; margin-left: 4px; }
+.pb-gap { color: #e84c4c; font-size: 12px; margin-left: 8px; }
+.pb-done { color: #67c23a; font-size: 12px; margin-left: 8px; }
+.promo-max { text-align: center; font-size: 18px; padding: 20px; color: #c9a96e; font-weight: 700; }
 </style>

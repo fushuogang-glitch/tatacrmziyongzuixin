@@ -475,6 +475,7 @@ def list_sessions(
             "description": s.description,
             "cover_image": s.cover_image,
             "highlights": s.highlights,
+            "target_audience": s.target_audience,
         }
         svc = db.query(Service).filter(Service.id == s.service_id).first()
         d['service_name'] = svc.name if svc else ''
@@ -538,7 +539,26 @@ def member_enroll(
     db.commit()
     db.refresh(e)
 
-    # TODO: 通知归属老师（飞书/企微消息）
+    # 发射事件通知
+    try:
+        from models.webhook_event import emit_event
+        member = db.query(Member).filter(Member.id == current.id).first()
+        emit_event(db, "course.enrolled", {
+            "enrollment_id": e.id,
+            "session_id": sid,
+            "session_title": cs.title,
+            "member_id": current.id,
+            "member_name": member.name if member else "",
+            "member_phone": member.phone if member else "",
+            "price_type": price_type,
+            "paid_amount": float(paid),
+            "start_date": str(cs.start_date),
+            "end_date": str(cs.end_date),
+            "venue": cs.venue or "",
+        })
+    except Exception as ex:
+        import logging
+        logging.getLogger("course_sessions").warning(f"emit course.enrolled failed: {ex}")
 
     return ok(to_dict(e))
 

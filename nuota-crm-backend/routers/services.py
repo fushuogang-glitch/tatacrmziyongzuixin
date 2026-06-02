@@ -197,7 +197,29 @@ def list_services(category: Optional[str] = None, db: Session = Depends(get_db))
     if category:
         q = q.filter(Service.category == category)
     items = q.order_by(Service.id).all()
-    return ok([ServiceOut.from_orm(s).dict() for s in items])
+    # 查所有活跃老师及其 service_modules
+    import json as _json
+    consultants = db.query(Consultant).filter(Consultant.status == "active").all()
+    consultant_map = {}  # service_id -> [consultant_info]
+    for c in consultants:
+        try:
+            modules = _json.loads(c.service_modules) if c.service_modules else []
+        except:
+            modules = []
+        for sid in modules:
+            consultant_map.setdefault(sid, []).append({
+                "id": c.id,
+                "name": c.name,
+                "specialty": c.specialty or "",
+                "level": c.level or "",
+                "avatar": c.avatar or "",
+            })
+    result = []
+    for s in items:
+        d = ServiceOut.from_orm(s).dict()
+        d["consultants"] = consultant_map.get(s.id, [])
+        result.append(d)
+    return ok(result)
 
 
 @router.get("/grouped")

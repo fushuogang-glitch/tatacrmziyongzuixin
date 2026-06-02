@@ -81,6 +81,7 @@ class Payment(Base):
     pay_status = Column(String(20), default="pending")         # pending/paid/partial/refunded
     package_id = Column(Integer, ForeignKey("service_packages.id"), index=True)  # 关联套餐
     service_id = Column(Integer, ForeignKey("services.id"))                       # 合作项目
+    branch_id = Column(Integer, ForeignKey("branches.id"))                        # 分公司
     pay_time = Column(DateTime)
     due_date = Column(Date)                                    # 补款截止日期
     due_notified = Column(Boolean, default=False)              # 已发提醒标记

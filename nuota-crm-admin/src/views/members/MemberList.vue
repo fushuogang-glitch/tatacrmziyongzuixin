@@ -2,6 +2,7 @@
 import { onMounted, reactive, ref, computed } from 'vue';
 import { useRouter } from 'vue-router';
 import { ElMessage } from 'element-plus';
+import { Close } from '@element-plus/icons-vue';
 import { API } from '../../api';
 import { useUserStore } from '../../store/user';
 
@@ -54,7 +55,10 @@ const payDialog = reactive({
     pay_type: 'annual', pay_status: 'paid',
     consultant_id: null as number | null,
     service_id: null as number | null,
+    service_ids: [] as number[],
     total_times: 6,
+    pay_date: null as string | null,
+    receipt_image: null as string | null,
     remark: '',
     due_date: null as string | null,
   }
@@ -123,11 +127,24 @@ function openPay(row: any) {
     pay_type: 'annual', pay_status: 'paid',
     consultant_id: row.consultant_id || null,
     service_id: null as number | null,
+    service_ids: [] as number[],
     total_times: 6,
+    pay_date: null as string | null,
+    receipt_image: null as string | null,
     due_date: null,
     remark: ''
   };
   payDialog.visible = true;
+}
+
+async function uploadReceipt(options: any) {
+  try {
+    const url: any = await API.uploadImage(options.file);
+    payDialog.form.receipt_image = url;
+    ElMessage.success('凭证上传成功');
+  } catch {
+    ElMessage.error('上传失败');
+  }
 }
 
 async function submitPay() {
@@ -141,11 +158,30 @@ async function submitPay() {
 function onPayTypeChange(val: string) {
   if (val === 'annual') {
     payDialog.form.total_times = 6;
+    payDialog.form.amount = 36800;
   } else if (val === 'single') {
-    payDialog.form.total_times = 1;
+    onServiceChange(payDialog.form.service_ids);
   } else {
-    payDialog.form.total_times = 1;
+    onServiceChange(payDialog.form.service_ids);
   }
+}
+
+// 合作项目多选联动：自动计算价格和次数
+function onServiceChange(ids: number[]) {
+  if (!ids || ids.length === 0) return;
+  // 年费制不联动价格（固定36800）
+  if (payDialog.form.pay_type === 'annual') return;
+  let totalPrice = 0;
+  let totalTimes = 0;
+  for (const id of ids) {
+    const svc = services.value.find((s: any) => s.id === id);
+    if (svc) {
+      totalPrice += Number(svc.price) || 0;
+      totalTimes += Number(svc.total_times) || 1;
+    }
+  }
+  payDialog.form.amount = totalPrice;
+  payDialog.form.total_times = totalTimes || 1;
 }
 
 function typeTag(t: string) {
@@ -377,7 +413,7 @@ onMounted(() => { load(); loadConsultants(); });
           </el-select>
         </el-form-item>
         <el-form-item label="合作项目">
-          <el-select v-model="payDialog.form.service_id" style="width:100%" clearable placeholder="选择关联专案/服务" filterable>
+          <el-select v-model="payDialog.form.service_ids" style="width:100%" clearable placeholder="选择关联专案/服务" filterable multiple collapse-tags collapse-tags-tooltip @change="onServiceChange">
             <el-option v-for="s in services" :key="s.id" :value="s.id" :label="`${s.name} · ¥${s.price || 0}`" />
           </el-select>
         </el-form-item>
@@ -402,6 +438,10 @@ onMounted(() => { load(); loadConsultants(); });
             <el-option label="微信代收" value="wechat_proxy" />
           </el-select>
         </el-form-item>
+        <el-form-item label="付费日期">
+          <el-date-picker v-model="payDialog.form.pay_date" type="date"
+            value-format="YYYY-MM-DD" placeholder="默认今天，老客户可选历史日期" style="width:100%" />
+        </el-form-item>
         <el-form-item label="付款金额"><el-input-number v-model="payDialog.form.amount" :min="0" :step="1000" style="width:100%;" /></el-form-item>
         <el-form-item label="服务次数" v-if="payDialog.form.pay_type !== 'trial'">
           <el-input-number v-model="payDialog.form.total_times" :min="1" :max="100" style="width:100%;" />
@@ -415,6 +455,22 @@ onMounted(() => { load(); loadConsultants(); });
           <el-date-picker v-model="payDialog.form.due_date" type="date"
             value-format="YYYY-MM-DD" placeholder="选择补款截止日期" style="width:100%" />
           <div style="font-size:12px;color:#e6a817;margin-top:4px">📅 到期前一天自动提醒老师</div>
+        </el-form-item>
+        <el-form-item label="付款凭证">
+          <el-upload
+            :auto-upload="true"
+            :show-file-list="false"
+            :http-request="uploadReceipt"
+            accept="image/*"
+          >
+            <div v-if="payDialog.form.receipt_image" style="position:relative;">
+              <el-image :src="payDialog.form.receipt_image" style="width:120px;height:120px;border-radius:8px;" fit="cover" :preview-src-list="[payDialog.form.receipt_image]" />
+              <el-button size="small" type="danger" circle style="position:absolute;top:-8px;right:-8px;" @click.stop="payDialog.form.receipt_image = null">
+                <el-icon><Close /></el-icon>
+              </el-button>
+            </div>
+            <el-button v-else type="primary" plain size="small">📎 上传凭证图片</el-button>
+          </el-upload>
         </el-form-item>
         <el-form-item label="备注"><el-input v-model="payDialog.form.remark" type="textarea" rows="2" /></el-form-item>
       </el-form>

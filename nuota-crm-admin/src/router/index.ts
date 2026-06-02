@@ -6,6 +6,7 @@ const routes: RouteRecordRaw[] = [
   { path: '/', redirect: '/dashboard' },
   { path: '/dashboard', component: () => import('../views/dashboard/Dashboard.vue'), meta: { title: '数据看板' } },
   { path: '/my-dashboard', component: () => import('../views/dashboard/ConsultantDashboard.vue'), meta: { title: '我的看板' } },
+  { path: '/customers', component: () => import('../views/customers/CustomerBoard.vue'), meta: { title: '客户管理' } },
   { path: '/members', component: () => import('../views/members/MemberList.vue'), meta: { title: '学员管理' } },
   { path: '/members/:id', component: () => import('../views/members/MemberDetail.vue'), meta: { title: '学员详情' } },
   { path: '/payments', component: () => import('../views/members/PaymentList.vue'), meta: { title: '收款明细' } },
@@ -30,6 +31,9 @@ const routes: RouteRecordRaw[] = [
   { path: '/courses/:id', component: () => import('../views/courses/CourseDetail.vue'), meta: { title: '课程详情' } },
   { path: '/course-sessions', component: () => import('../views/course-sessions/CourseSessionList.vue'), meta: { title: '课程场次' } },
   { path: '/articles', component: () => import('../views/articles/ArticleList.vue'), meta: { title: '内容管理' } },
+  { path: '/salary', component: () => import('../views/salary/SalaryManage.vue'), meta: { title: '工资管理' } },
+  { path: '/promotion', component: () => import('../views/promotion/PromotionManage.vue'), meta: { title: '晋级管理' } },
+  { path: '/banners', component: () => import('../views/banners/BannerManage.vue'), meta: { title: '广告位管理' } },
 ];
 
 const router = createRouter({ history: createWebHashHistory(), routes });

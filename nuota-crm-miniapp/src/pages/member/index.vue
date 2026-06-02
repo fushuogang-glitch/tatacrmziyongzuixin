@@ -82,10 +82,12 @@
         <text class="list-l">会 员 权 益</text>
         <text class="list-r">{{ tierLabel }} →</text>
       </view>
-      <view class="list-row" @tap="go('/pages/face/bind/bind')">
+      <!-- 人脸认证入口暂时隐藏（待接入国家网络身份认证后恢复）
+      <view class="list-row" @tap="go('/pages/face/bind/bind')" v-if="false">
         <text class="list-l">人 脸 认 证</text>
         <text class="list-r">{{ faceBound ? '已绑定' : '去绑定' }} →</text>
       </view>
+      -->
       <view class="list-row" @tap="go('/pages/agreement/sign')">
         <text class="list-l">服 务 协 议</text>
         <text class="list-r">v1.0 →</text>

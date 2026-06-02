@@ -1,13 +1,27 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref, computed } from 'vue';
 import { ElMessage } from 'element-plus';
+import { Plus } from '@element-plus/icons-vue';
 import { API } from '../../api';
 
 const rows = ref<any[]>([]);
 const loading = ref(false);
-const services = ref<any[]>([]); // 动态服务项目库
-const branches = ref<any[]>([]); // 分公司列表
+const services = ref<any[]>([]);
+const branches = ref<any[]>([]);
 const dialog = reactive({ visible: false, mode: 'create' as 'create' | 'edit', form: {} as any });
+const avatarUploading = ref(false);
+const expandedRows = ref<number[]>([]);
+const statsCache = ref<Record<number, any>>({});
+const statsLoading = ref<Record<number, boolean>>({});
+const statsMonthStr = ref(`${new Date().getFullYear()}-${String(new Date().getMonth()+1).padStart(2,'0')}`);
+const statsMonth = computed({
+  get: () => statsMonthStr.value,
+  set: (v: string) => { statsMonthStr.value = v; }
+});
+const statsYear = computed(() => parseInt(statsMonthStr.value.split('-')[0]));
+const statsMonthNum = computed(() => parseInt(statsMonthStr.value.split('-')[1]));
+
+const BASE_URL = import.meta.env.VITE_API_BASE || '';
 
 async function loadServices() {
   try {
@@ -16,7 +30,6 @@ async function loadServices() {
   } catch { services.value = []; }
 }
 
-// 按分类分组
 const servicesByCategory = computed(() => {
   const map: Record<string, any[]> = {};
   for (const s of services.value) {
@@ -38,28 +51,52 @@ async function load() {
 
 function openCreate() {
   dialog.mode = 'create';
-  dialog.form = { name: '', phone: '', specialty: '', company: '', branch_id: null, service_ids: [], monthly_days: 14, course_days: 8, level: 'trainee', status: 'active' };
+  dialog.form = { name: '', phone: '', specialty: '', company: '', branch_id: null, service_ids: [], monthly_days: 14, course_days: 8, level: 'trainee', status: 'active', avatar: '', position: null, referrer_id: null, mentor_id: null };
   dialog.visible = true;
 }
 function openEdit(row: any) {
   dialog.mode = 'edit';
-  dialog.form = { ...row, service_ids: row.service_ids || [] };
+  dialog.form = { ...row, service_ids: row.service_ids || [], avatar: row.avatar || '', position: row.position || null, referrer_id: row.referrer_id || null, mentor_id: row.mentor_id || null };
   dialog.visible = true;
 }
 
+async function handleAvatarUpload(file: any) {
+  avatarUploading.value = true;
+  try {
+    const res: any = await API.uploadImage(file.raw || file);
+    dialog.form.avatar = res.url;
+    ElMessage.success('头像上传成功');
+  } catch (e) {
+    ElMessage.error('上传失败');
+  } finally {
+    avatarUploading.value = false;
+  }
+  return false; // 阻止默认上传
+}
+
+function avatarUrl(url: string) {
+  if (!url) return '';
+  if (url.startsWith('http')) return url;
+  return BASE_URL + url;
+}
+
 async function submit() {
-  const body = {
+  const body: any = {
     name: dialog.form.name,
     phone: dialog.form.phone,
     specialty: dialog.form.specialty,
     company: dialog.form.company,
-    service_modules: JSON.stringify([]),  // 保留兼容旧字段
+    service_modules: JSON.stringify([]),
     service_ids: dialog.form.service_ids || [],
     monthly_days: dialog.form.monthly_days,
     course_days: dialog.form.course_days,
     branch_id: dialog.form.branch_id || null,
     level: dialog.form.level || 'trainee',
     status: dialog.form.status,
+    avatar: dialog.form.avatar || null,
+    position: dialog.form.position || null,
+    referrer_id: dialog.form.referrer_id || null,
+    mentor_id: dialog.form.mentor_id || null,
   };
   if (dialog.mode === 'create') {
     await API.consultantCreate(body);
@@ -72,22 +109,13 @@ async function submit() {
   load();
 }
 
-function getServiceNames(row: any) {
-  const ids = row.service_ids || [];
-  if (!ids.length) return '-';
-  return ids.map((id: number) => {
-    const s = services.value.find((sv: any) => sv.id === id);
-    return s ? s.name : `#${id}`;
-  }).join('、');
-}
-
 function statusTag(s: string) {
   return { active: 'success', inactive: 'info' }[s] || '';
 }
 
 const levelLabels: Record<string, string> = {
-  trainee: '培训期', probation: '考核期', pm: '项目经理', pd: '项目总监',
-  junior_partner: '初级合伙人', partner: '合伙人', senior_partner: '高级合伙人', founding_partner: '创始合伙人',
+  trainee: '培训期 T', probation: '考核期 P', pm: '项目经理 PM', pd: '项目总监 PD',
+  junior_partner: '初级合伙人 JP', partner: '中级合伙人 MP', senior_partner: '高级合伙人 SP', founding_partner: '创始合伙人 FP',
 };
 function levelLabel(l: string) { return levelLabels[l] || l || '培训期'; }
 function levelTag(l: string) {
@@ -110,6 +138,29 @@ async function loadBranches() {
 }
 
 onMounted(() => { load(); loadServices(); loadBranches(); });
+
+async function loadStats(cid: number) {
+  if (statsCache.value[cid]) return;
+  statsLoading.value[cid] = true;
+  try {
+    const res: any = await API.get(`/admin/consultants/${cid}/monthly-stats?year=${statsYear.value}&month=${statsMonthNum.value}`);
+    statsCache.value[cid] = res?.data || res || {};
+  } catch { statsCache.value[cid] = {}; }
+  finally { statsLoading.value[cid] = false; }
+}
+
+function handleExpand(row: any, expanded: any[]) {
+  const isExpanded = expanded.some((r: any) => r.id === row.id);
+  if (isExpanded) {
+    loadStats(row.id);
+  }
+}
+
+async function changeStatsMonth(cid: number) {
+  // 清除所有缓存，切换月份后重新加载
+  statsCache.value = {};
+  await loadStats(cid);
+}
 </script>
 
 <template>
@@ -123,8 +174,57 @@ onMounted(() => { load(); loadServices(); loadBranches(); });
       <el-alert type="info" :closable="false" style="margin-top: 12px;"
         title="名额规则：每位老师每月可下店次数 = (22工作日 - 课程日 - 2缓冲日) ÷ 2天 ≈ 6次" />
 
-      <el-table :data="rows" v-loading="loading" stripe style="margin-top: 16px;">
+      <el-table :data="rows" v-loading="loading" stripe style="margin-top: 16px;" @expand-change="handleExpand" row-key="id">
+        <el-table-column type="expand">
+          <template #default="{ row }">
+            <div class="stats-panel" v-loading="statsLoading[row.id]">
+              <div class="stats-month-picker">
+                <el-date-picker v-model="statsMonthStr" type="month" value-format="YYYY-MM" format="YYYY年MM月"
+                  size="small" style="width:160px" @change="changeStatsMonth(row.id)" />
+              </div>
+              <el-table :data="[statsCache[row.id]]" v-if="statsCache[row.id]" size="small" border style="width:100%">
+                <el-table-column label="主案天数" align="center" width="80">
+                  <template #default="{ row: s }">{{ s.main_days || 0 }}</template>
+                </el-table-column>
+                <el-table-column label="助理天数" align="center" width="80">
+                  <template #default="{ row: s }">{{ s.assist_days || 0 }}</template>
+                </el-table-column>
+                <el-table-column label="归属会员" align="center" width="80">
+                  <template #default="{ row: s }">{{ s.member_count || 0 }}</template>
+                </el-table-column>
+                <el-table-column label="跟进客户" align="center" width="80">
+                  <template #default="{ row: s }">{{ s.active_clients || 0 }}</template>
+                </el-table-column>
+                <el-table-column label="主案客户" align="center" width="80">
+                  <template #default="{ row: s }">{{ s.main_clients || 0 }}</template>
+                </el-table-column>
+                <el-table-column label="助理客户" align="center" width="80">
+                  <template #default="{ row: s }">{{ s.assist_clients || 0 }}</template>
+                </el-table-column>
+                <el-table-column label="销售额" align="center" width="100">
+                  <template #default="{ row: s }">¥{{ (s.sales || 0).toLocaleString() }}</template>
+                </el-table-column>
+                <el-table-column label="消耗额" align="center" width="100">
+                  <template #default="{ row: s }">¥{{ (s.consumption || 0).toLocaleString() }}</template>
+                </el-table-column>
+                <el-table-column label="课程报名" align="center" width="80">
+                  <template #default="{ row: s }">{{ s.course_enrolled || 0 }}</template>
+                </el-table-column>
+                <el-table-column label="课程参加" align="center" width="80">
+                  <template #default="{ row: s }">{{ s.course_attended || 0 }}</template>
+                </el-table-column>
+              </el-table>
+              <div v-else style="color:#999;padding:20px;text-align:center;">暂无数据</div>
+            </div>
+          </template>
+        </el-table-column>
         <el-table-column prop="id" label="ID" width="60" />
+        <el-table-column label="头像" width="70" align="center">
+          <template #default="{ row }">
+            <el-avatar v-if="row.avatar" :src="avatarUrl(row.avatar)" :size="40" />
+            <el-avatar v-else :size="40" style="background:#c9a96e;font-size:16px;">{{ row.name?.charAt(0) || '?' }}</el-avatar>
+          </template>
+        </el-table-column>
         <el-table-column prop="name" label="姓名" width="100" />
         <el-table-column prop="phone" label="手机" width="130" />
         <el-table-column prop="specialty" label="专业领域" width="130" />
@@ -161,6 +261,15 @@ onMounted(() => { load(); loadServices(); loadBranches(); });
             <span v-else style="color:#c0c4cc">未生成</span>
           </template>
         </el-table-column>
+        <el-table-column label="推荐人" width="90">
+          <template #default="{ row }">{{ row.referrer_name || '-' }}</template>
+        </el-table-column>
+        <el-table-column label="带教人" width="90">
+          <template #default="{ row }">{{ row.mentor_name || '-' }}</template>
+        </el-table-column>
+        <el-table-column label="岗位" width="140">
+          <template #default="{ row }">{{ row.position || '-' }}</template>
+        </el-table-column>
         <el-table-column label="状态" width="80">
           <template #default="{ row }">
             <el-tag :type="statusTag(row.status)">{{ row.status === 'active' ? '在岗' : '停用' }}</el-tag>
@@ -176,6 +285,24 @@ onMounted(() => { load(); loadServices(); loadBranches(); });
 
     <el-dialog v-model="dialog.visible" :title="dialog.mode === 'create' ? '新增老师' : '编辑老师'" width="580px">
       <el-form :model="dialog.form" label-width="130px">
+        <el-form-item label="头像">
+          <div class="avatar-upload">
+            <el-upload
+              class="avatar-uploader"
+              :show-file-list="false"
+              :auto-upload="false"
+              accept="image/*"
+              @change="handleAvatarUpload"
+            >
+              <el-avatar v-if="dialog.form.avatar" :src="avatarUrl(dialog.form.avatar)" :size="80" />
+              <div v-else class="avatar-placeholder">
+                <el-icon :size="28"><Plus /></el-icon>
+                <span>上传头像</span>
+              </div>
+            </el-upload>
+            <span v-if="avatarUploading" style="color:#409eff;font-size:12px;margin-left:12px;">上传中...</span>
+          </div>
+        </el-form-item>
         <el-form-item label="姓名" required><el-input v-model="dialog.form.name" /></el-form-item>
         <el-form-item label="手机"><el-input v-model="dialog.form.phone" /></el-form-item>
         <el-form-item label="专业领域"><el-input v-model="dialog.form.specialty" placeholder="如：皮肤管理、仪器操作" /></el-form-item>
@@ -222,6 +349,27 @@ onMounted(() => { load(); loadServices(); loadBranches(); });
           <el-input :model-value="dialog.form.referral_code" disabled style="font-family:monospace;letter-spacing:2px;" />
           <div style="font-size:12px;color:#909399;margin-top:4px">老师专属推荐码，新客注册时输入可自动归属到该老师</div>
         </el-form-item>
+        <el-form-item label="岗位">
+          <el-select v-model="dialog.form.position" placeholder="无岗位" clearable style="width:100%">
+            <el-option label="人力组织总监" value="人力组织总监" />
+            <el-option label="销售总监" value="销售总监" />
+            <el-option label="品牌线上运营总监" value="品牌线上运营总监" />
+            <el-option label="财务总监" value="财务总监" />
+            <el-option label="运营总经理" value="运营总经理" />
+            <el-option label="运营总助" value="运营总助" />
+            <el-option label="分公司总经理（人才发展官）" value="分公司总经理（人才发展官）" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="推荐人">
+          <el-select v-model="dialog.form.referrer_id" placeholder="无推荐人" clearable filterable style="width:100%">
+            <el-option v-for="c in rows.filter(r => r.id !== dialog.form.id)" :key="c.id" :label="c.name" :value="c.id" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="带教人（师父）">
+          <el-select v-model="dialog.form.mentor_id" placeholder="无带教人" clearable filterable style="width:100%">
+            <el-option v-for="c in rows.filter(r => r.id !== dialog.form.id)" :key="c.id" :label="c.name" :value="c.id" />
+          </el-select>
+        </el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="dialog.visible = false">取消</el-button>
@@ -248,5 +396,38 @@ onMounted(() => { load(); loadServices(); loadBranches(); });
 .cat-label {
   font-weight: 600;
   font-size: 13px;
+}
+.avatar-upload {
+  display: flex;
+  align-items: center;
+}
+.avatar-uploader {
+  cursor: pointer;
+}
+.avatar-placeholder {
+  width: 80px;
+  height: 80px;
+  border: 2px dashed #dcdfe6;
+  border-radius: 50%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  color: #909399;
+  font-size: 12px;
+  gap: 4px;
+  transition: border-color 0.3s;
+}
+.avatar-placeholder:hover {
+  border-color: #c9a96e;
+  color: #c9a96e;
+}
+.stats-panel {
+  padding: 16px 24px;
+  background: #fafafa;
+  border-radius: 8px;
+}
+.stats-month-picker {
+  margin-bottom: 8px;
 }
 </style>

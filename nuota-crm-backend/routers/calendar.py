@@ -473,6 +473,7 @@ def public_consultants(service_id: Optional[int] = None, db: Session = Depends(g
             "name": c.name,
             "specialty": c.specialty or "",
             "service_modules": c.service_modules or "[]",
+            "avatar": c.avatar or "",
         })
     return ok(result)
 

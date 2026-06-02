@@ -227,10 +227,14 @@ class ConsultantIn(BaseModel):
     phone: Optional[str] = None
     specialty: Optional[str] = None
     company: Optional[str] = None
+    branch_id: Optional[int] = None
     service_modules: Optional[str] = None
+    service_ids: Optional[list] = None  # 前端传的服务ID列表
     monthly_days: int = 14
     course_days: int = 8
+    level: Optional[str] = "trainee"
     status: str = "active"
+    avatar: Optional[str] = None
 
 
 # ========= 名额 =========

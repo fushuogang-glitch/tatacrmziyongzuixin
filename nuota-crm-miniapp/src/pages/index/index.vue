@@ -13,9 +13,11 @@
 
     <!-- 快捷入口 -->
     <view class="grid">
+      <!-- 扫脸签到暂时隐藏
       <view class="grid-item" @tap="go('/pages/face/checkin/checkin')">
         <text class="icon">📷</text><text>扫脸签到</text>
       </view>
+      -->
       <view class="grid-item" @tap="go('/pages/sessions/list/list')">
         <text class="icon">📅</text><text>课程报名</text>
       </view>

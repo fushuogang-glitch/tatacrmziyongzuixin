@@ -6,8 +6,8 @@
       <text class="meta">版本 {{ version }} · 生效日期 {{ effectiveDate }}</text>
     </view>
 
-    <scroll-view scroll-y class="body">
-      <text class="content">{{ content }}</text>
+    <scroll-view scroll-y class="body" :style="{height: bodyHeight + 'px'}">
+      <rich-text :nodes="contentHtml"></rich-text>
 
       <view class="footer-mark">
         <view class="line"></view>
@@ -30,7 +30,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
+import { ref, computed, onMounted } from 'vue';
 import { api } from '../../api';
 
 const version = ref('v1.0');
@@ -38,16 +38,32 @@ const effectiveDate = ref('2026-05-13');
 const content = ref('');
 const agreed = ref(false);
 const loading = ref(false);
+const bodyHeight = ref(400);
+
+const contentHtml = computed(() => {
+  if (!content.value) return '';
+  // 将纯文本转为HTML段落
+  return content.value
+    .split('\n')
+    .map(line => {
+      if (!line.trim()) return '<br/>';
+      return `<p style="font-size:24rpx;line-height:1.9;color:#333;letter-spacing:1rpx;margin:0;padding:0">${line}</p>`;
+    })
+    .join('');
+});
 
 async function loadAgreement() {
   try {
     const r: any = await api.getAgreement();
-    if (r?.data) {
-      version.value = r.data.version;
-      effectiveDate.value = r.data.effective_date;
-      content.value = r.data.content;
+    console.log('[agreement] API response:', JSON.stringify(r));
+    if (r) {
+      version.value = r.version || 'v1.0';
+      effectiveDate.value = r.effective_date || '2026-05-13';
+      content.value = r.content || '';
+      console.log('[agreement] content length:', content.value.length);
     }
-  } catch (e) {
+  } catch (e: any) {
+    console.error('[agreement] load error:', e);
     content.value = '协议加载失败，请退出重试。';
   }
 }
@@ -88,6 +104,9 @@ function refuse() {
 }
 
 onMounted(() => {
+  // 计算滚动区域高度
+  const sysInfo = uni.getSystemInfoSync();
+  bodyHeight.value = sysInfo.windowHeight - 280; // 头部 + 底部预留
   loadAgreement();
 });
 </script>
@@ -132,8 +151,8 @@ onMounted(() => {
 }
 
 .body {
-  flex: 1;
-  padding: 32rpx 48rpx 280rpx;
+  padding: 32rpx 48rpx 20rpx;
+  overflow-y: auto;
 }
 .content {
   display: block;

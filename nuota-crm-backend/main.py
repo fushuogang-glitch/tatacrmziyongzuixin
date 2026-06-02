@@ -240,3 +240,17 @@ app.include_router(webhook_admin_router)
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("main:app", host=settings.APP_HOST, port=settings.APP_PORT, reload=True)
+
+# ── 文件上传 ──
+from routers.upload import router as upload_router
+app.include_router(upload_router)
+
+# ── 静态文件 ──
+from starlette.staticfiles import StaticFiles
+import os
+os.makedirs('/www/nuota-crm/static/uploads', exist_ok=True)
+app.mount('/static', StaticFiles(directory='/www/nuota-crm/static'), name='static')
+
+# ── 微信支付 ──
+from routers.payment import router as payment_router
+app.include_router(payment_router)

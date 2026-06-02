@@ -151,9 +151,8 @@ const syllabus = [
 ];
 const audience = ['门店主', '合伙人', '店长', '区域负责人', '计划扩张的创业者'];
 const notices = [
-  '报名成功后请在小程序完成人脸绑定，用于现场签到',
   '体验价每人限购一次，购买后不退',
-  '课程手册仅限已报名学员扫脸领取',
+  '课程手册仅限已报名学员领取',
   '迟到超过1小时视为缺席，不补课不退费',
   '如需开发票请在报名时备注',
 ];
@@ -175,10 +174,11 @@ async function enroll() {
     setTimeout(() => uni.navigateTo({ url: '/pages/login/login' }), 800);
     return;
   }
-  if (!member.face_bound) {
-    uni.showModal({ title: '需要人脸认证', content: '报名后需扫脸签到，请先完成人脸绑定', confirmText: '去绑定', success: (r) => { if (r.confirm) uni.navigateTo({ url: '/pages/face/bind/bind' }); } });
-    return;
-  }
+  // 人脸认证检查暂时关闭（待接入国家网络身份认证后恢复）
+  // if (!member.face_bound) {
+  //   uni.showModal({ title: '需要人脸认证', content: '报名后需扫脸签到，请先完成人脸绑定', confirmText: '去绑定', success: (r) => { if (r.confirm) uni.navigateTo({ url: '/pages/face/bind/bind' }); } });
+  //   return;
+  // }
   enrolling.value = true;
   try {
     await api.enroll(sessionId);

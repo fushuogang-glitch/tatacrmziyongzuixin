@@ -99,6 +99,33 @@ function fmtMoney(v: any) {
   return parseFloat(v).toLocaleString('zh-CN');
 }
 
+function defaultHighlights() {
+  return [
+    { icon: 'S', title: '系统方法论', desc: '塔塔核心三多体系 · 黄金三角模型' },
+    { icon: 'A', title: 'AI赋能实战', desc: '塔塔定制版Agent · 现场部署上线' },
+    { icon: 'C', title: '案例研讨会', desc: '真实门店诊断 · 现场出执案方案' },
+    { icon: 'T', title: '落地工具箱', desc: '品项搭建 · 人力架构 · 营销日历' },
+    { icon: 'E', title: '持续陪跑', desc: '课后老师群 · 执案跟进 · 月度复盘' },
+  ];
+}
+
+function parseHighlights(raw: any): any[] {
+  if (!raw) return defaultHighlights();
+  if (typeof raw === 'string') {
+    try { const arr = JSON.parse(raw); if (Array.isArray(arr)) return arr; } catch {}
+    return raw.split('\n').filter((x: string) => x.trim()).map((line: string) => {
+      const p = line.split(',');
+      return { icon: p[0] || '◆', title: p[1] || '', desc: p[2] || '' };
+    });
+  }
+  if (Array.isArray(raw)) return raw;
+  return defaultHighlights();
+}
+
+function serializeHighlights(arr: any[]): string {
+  return JSON.stringify(arr.filter((h: any) => h.title?.trim()));
+}
+
 function openCreate() {
   dialog.mode = 'create';
   dialog.form = {
@@ -108,6 +135,7 @@ function openCreate() {
     normal_price: null, trial_price: null,
     description: '',
     highlights: '',
+    highlightItems: defaultHighlights(),
     target_audience: '',
   };
   dialog.visible = true;
@@ -115,19 +143,30 @@ function openCreate() {
 
 function openEdit(row: any) {
   dialog.mode = 'edit';
-  dialog.form = { ...row };
+  dialog.form = { ...row, highlightItems: parseHighlights(row.highlights) };
   dialog.visible = true;
+}
+
+function addHighlightRow() {
+  dialog.form.highlightItems.push({ icon: '', title: '', desc: '' });
+}
+
+function removeHighlightRow(idx: number) {
+  dialog.form.highlightItems.splice(idx, 1);
 }
 
 async function submitSession() {
   if (!dialog.form.service_id) { ElMessage.warning('请选择课程产品'); return; }
   if (!dialog.form.start_date) { ElMessage.warning('请选择开课日期'); return; }
+  // 序列化亮点
+  const payload = { ...dialog.form, highlights: serializeHighlights(dialog.form.highlightItems || []) };
+  delete payload.highlightItems;
   try {
     if (dialog.mode === 'create') {
-      await API.courseSessionCreate(dialog.form);
+      await API.courseSessionCreate(payload);
       ElMessage.success('场次创建成功');
     } else {
-      await API.courseSessionUpdate(dialog.form.id, dialog.form);
+      await API.courseSessionUpdate(payload.id, payload);
       ElMessage.success('保存成功');
     }
     dialog.visible = false;
@@ -486,10 +525,18 @@ onUnmounted(() => { stopCamera(); closeBindFace(); });
           <el-form-item label="试听价格" style="flex:1"><el-input-number v-model="dialog.form.trial_price" :min="0" :step="100" style="width:100%;" /></el-form-item>
         </div>
         <el-form-item label="课程介绍"><el-input v-model="dialog.form.description" type="textarea" rows="3" /></el-form-item>
-        <el-form-item label="课程亮点"><el-input v-model="dialog.form.highlights" type="textarea" rows="4" placeholder="每行一个亮点，格式：emoji,标题,描述
-例如：
-🎯,系统方法论,塔塔核心体系
-👥,现场互动,案例研讨实操" /><div style="font-size:12px;color:#999;margin-top:4px;">每行一个亮点，用逗号分隔：emoji,标题,描述</div></el-form-item>
+        <el-form-item label="课程亮点">
+          <div style="width:100%">
+            <div v-for="(h, idx) in dialog.form.highlightItems" :key="idx" style="display:flex;gap:8px;margin-bottom:8px;align-items:center;">
+              <el-input v-model="h.icon" placeholder="图标" style="width:60px;flex-shrink:0;" maxlength="2" />
+              <el-input v-model="h.title" placeholder="标题（如：系统方法论）" style="width:160px;flex-shrink:0;" />
+              <el-input v-model="h.desc" placeholder="描述（如：塔塔核心三多体系·黄金三角模型）" style="flex:1;" />
+              <el-button link type="danger" @click="removeHighlightRow(idx)" :disabled="dialog.form.highlightItems.length <= 1">✕</el-button>
+            </div>
+            <el-button link type="primary" @click="addHighlightRow" v-if="dialog.form.highlightItems.length < 8">+ 添加亮点</el-button>
+            <div style="font-size:12px;color:#999;margin-top:4px;">图标用1-2个字母（如S/A/C），小程序显示为金色方块</div>
+          </div>
+        </el-form-item>
         <el-form-item label="适合人群"><el-input v-model="dialog.form.target_audience" type="textarea" rows="2" placeholder="每行一个，例如：
 门店主
 合伙人

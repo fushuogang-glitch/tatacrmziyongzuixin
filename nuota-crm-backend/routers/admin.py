@@ -1,6 +1,5 @@
 # 管理后台：学员 / 顾问 / 缴费 / 看板
-from datetime import date, datetime, timedelta
-import random
+from datetime import date, datetime
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -12,9 +11,11 @@ from database import get_db
 from models import (
     Member, Payment, Session as SessionModel, Enrollment,
     Referral, VisitReward, VisitBooking, Consultant, AdminUser,
-    Service, ServicePackage, PackageConsumption,
+    ServiceOrder, ServicePackage,
 )
 from models.booking import ConsultantSchedule
+from models.service import Service
+from routers.courses import CourseEnrollment
 from models.branch import Branch
 from schemas.api import (
     MemberRegisterIn, MemberUpdateIn, PaymentCreateIn, ConsultantIn,
@@ -283,6 +284,7 @@ def create_payment(body: PaymentCreateIn, db: Session = Depends(get_db),
     cid = body.consultant_id or m.consultant_id
     p = Payment(
         member_id=body.member_id,
+        service_id=body.service_id,
         consultant_id=cid,
         amount=body.amount,
         debt_amount=body.debt_amount or 0,
@@ -290,12 +292,59 @@ def create_payment(body: PaymentCreateIn, db: Session = Depends(get_db),
         pay_method=body.pay_method,
         pay_type=body.pay_type,
         pay_status=body.pay_status,
-        service_id=body.service_id,
         pay_time=datetime.utcnow() if body.pay_status in ("paid", "partial") else None,
         due_date=date.fromisoformat(body.due_date) if body.due_date else None,
         remark=body.remark,
     )
     db.add(p)
+    db.flush()  # 获取 p.id
+
+    # ── auto_create_package: 自动创建/关联 ServicePackage ──
+    # 年费制：年费总额 / 服务次数 = 每次扣费额
+    # 单次制：实际费用 / 专案次数 = 每次扣费额
+    if body.pay_status in ("paid", "partial") and body.amount and body.amount > 0:
+        pkg = None
+        if body.pay_type == "annual":
+            total = body.total_times or 6  # 默认6次
+            pkg_no = f"PKG-{datetime.now().strftime('%Y%m%d')}-{p.id:04d}"
+            per_fee = round(float(body.amount) / total, 2)
+            pkg = ServicePackage(
+                member_id=m.id,
+                package_no=pkg_no,
+                total_times=total,
+                used_times=0,
+                amount=body.amount,
+                per_time_fee=per_fee,
+                pay_type="annual",
+                start_date=date.today(),
+                expire_date=date.today().replace(year=date.today().year + 1),
+                status="active",
+                remark=f"年费套餐 {total}次 × {per_fee}元/次",
+            )
+            db.add(pkg)
+            db.flush()
+            p.package_id = pkg.id
+        elif body.pay_type in ("single", "trial") and body.service_id:
+            svc = db.query(Service).filter(Service.id == body.service_id).first()
+            if svc:
+                times = svc.total_times or 1
+                pkg_no = f"PKG-{datetime.now().strftime('%Y%m%d')}-{p.id:04d}"
+                per_fee = round(float(body.amount) / times, 2)
+                pkg = ServicePackage(
+                    member_id=m.id,
+                    package_no=pkg_no,
+                    total_times=times,
+                    used_times=0,
+                    amount=body.amount,
+                    per_time_fee=per_fee,
+                    pay_type="single",
+                    start_date=date.today(),
+                    status="active",
+                    remark=f"{svc.name} 单次购买 {times}次 × {per_fee}元/次",
+                )
+                db.add(pkg)
+                db.flush()
+                p.package_id = pkg.id
 
     # 同步更新学员归属老师（如果提供了）
     if body.consultant_id and body.consultant_id != m.consultant_id:
@@ -305,35 +354,6 @@ def create_payment(body: PaymentCreateIn, db: Session = Depends(get_db),
         if body.pay_type == "annual":
             m.member_type = "annual"
             m.enroll_date = m.enroll_date or date.today()
-
-        # ---- 自动创建套餐 ----
-        total_times = body.total_times
-        if body.pay_type == "annual":
-            total_times = total_times or 6  # 年费制默认6次
-        elif body.pay_type == "single" and body.service_id:
-            svc = db.query(Service).filter(Service.id == body.service_id).first()
-            total_times = total_times or (svc.total_times if svc and svc.total_times else 1)
-        else:
-            total_times = total_times or 1
-
-        per_time_fee = round(float(body.amount) / total_times, 2) if total_times else float(body.amount)
-
-        pkg_no = f"PKG-{date.today().strftime('%Y%m%d')}-{random.randint(1000, 9999)}"
-        pkg = ServicePackage(
-            member_id=body.member_id,
-            package_no=pkg_no,
-            total_times=total_times,
-            used_times=0,
-            amount=body.amount,
-            per_time_fee=per_time_fee,
-            pay_type=body.pay_type,
-            start_date=date.today(),
-            expire_date=date.today() + timedelta(days=365) if body.pay_type == "annual" else None,
-            status="active",
-        )
-        db.add(pkg)
-        db.flush()  # 获取 pkg.id
-        p.package_id = pkg.id
 
         reward = confirm_referral_on_payment(db, m.id)
         db.commit()
@@ -365,6 +385,28 @@ def list_payments(
     members_map = {m.id: m for m in db.query(Member).filter(Member.id.in_(member_ids)).all()} if member_ids else {}
     consultants_map = {c.id: c for c in db.query(Consultant).filter(Consultant.id.in_(consultant_ids)).all()} if consultant_ids else {}
 
+    # 关联分公司
+    from models.branch import Branch
+    branch_ids = list({p.branch_id for p in payments if p.branch_id})
+    branch_map = {}
+    if branch_ids:
+        brs = db.query(Branch).filter(Branch.id.in_(branch_ids)).all()
+        branch_map = {b.id: b.short_name or b.name for b in brs}
+
+    # 关联合作项目
+    service_ids = list({p.service_id for p in payments if p.service_id})
+    service_map = {}
+    if service_ids:
+        svcs = db.query(Service).filter(Service.id.in_(service_ids)).all()
+        service_map = {s.id: s.name for s in svcs}
+
+    # 关联套餐（扣费明细）
+    package_ids = list({p.package_id for p in payments if p.package_id})
+    package_map = {}
+    if package_ids:
+        pkgs = db.query(ServicePackage).filter(ServicePackage.id.in_(package_ids)).all()
+        package_map = {pk.id: pk for pk in pkgs}
+
     result = []
     for p in payments:
         d = to_dict(p)
@@ -374,59 +416,54 @@ def list_payments(
         d['enterprise_name'] = getattr(m, 'enterprise_name', '') if m else ''
         d['member_phone'] = m.phone if m else ''
         d['consultant_name'] = c.name if c else ''
-
+        d['branch_name'] = branch_map.get(p.branch_id, '') if p.branch_id else ''
+        d['service_name'] = service_map.get(p.service_id, '') if p.service_id else ''
         # 套餐扣费明细
-        if p.package_id:
-            pkg = db.query(ServicePackage).filter(ServicePackage.id == p.package_id).first()
-            if pkg:
-                d['total_times'] = pkg.total_times
-                d['used_times'] = pkg.used_times
-                d['remaining_times'] = pkg.total_times - pkg.used_times
-                d['per_time_fee'] = float(pkg.per_time_fee) if pkg.per_time_fee else 0
-                d['pay_type_label'] = '年费制' if pkg.pay_type == 'annual' else '单次制'
-            else:
-                d['total_times'] = d['used_times'] = d['remaining_times'] = 0
-                d['per_time_fee'] = 0
-                d['pay_type_label'] = '-'
+        pkg = package_map.get(p.package_id) if p.package_id else None
+        if pkg:
+            d['package_id'] = pkg.id
+            d['package_no'] = pkg.package_no
+            d['total_times'] = pkg.total_times
+            d['used_times'] = pkg.used_times or 0
+            d['remaining_times'] = (pkg.total_times or 0) - (pkg.used_times or 0)
+            d['per_time_fee'] = float(pkg.per_time_fee) if pkg.per_time_fee else 0
+            d['pay_type_label'] = '年费制' if (getattr(pkg, 'pay_type', '') or '') == 'annual' else '单次制'
         else:
-            d['total_times'] = d['used_times'] = d['remaining_times'] = 0
-            d['per_time_fee'] = 0
-            d['pay_type_label'] = '-'
-
-        # 合作项目名称
-        if getattr(p, 'service_id', None):
-            svc = db.query(Service).filter(Service.id == p.service_id).first()
-            d['service_name'] = svc.name if svc else '-'
-        else:
-            d['service_name'] = '-'
-
+            d['package_id'] = None
+            d['package_no'] = None
+            d['total_times'] = None
+            d['used_times'] = None
+            d['remaining_times'] = None
+            d['per_time_fee'] = None
+            d['pay_type_label'] = None
         result.append(d)
     return ok(result)
-
-
-# ---------- 消耗明细 ----------
-@router.get("/services/consumptions")
-def list_consumptions(
-    member_id: Optional[int] = None,
-    package_id: Optional[int] = None,
-    db: Session = Depends(get_db),
-    _: AdminUser = Depends(get_current_admin),
-):
-    q = db.query(PackageConsumption)
-    if member_id:
-        q = q.filter(PackageConsumption.member_id == member_id)
-    if package_id:
-        q = q.filter(PackageConsumption.package_id == package_id)
-    items = q.order_by(PackageConsumption.id.desc()).limit(500).all()
-    return ok([to_dict(c) for c in items])
 
 
 # ---------- 顾问 ----------
 @router.get("/consultants")
 def list_consultants(db: Session = Depends(get_db),
                      _: AdminUser = Depends(get_current_admin)):
+    from models.branch import Branch
     rows = db.query(Consultant).order_by(Consultant.id.asc()).all()
-    return ok([to_dict(c) for c in rows])
+    # 批量查分公司名
+    branch_ids = list({c.branch_id for c in rows if c.branch_id})
+    branch_map = {}
+    if branch_ids:
+        branches = db.query(Branch).filter(Branch.id.in_(branch_ids)).all()
+        branch_map = {b.id: b.short_name or b.name for b in branches}
+    result = []
+    for c in rows:
+        d = to_dict(c)
+        d['branch_name'] = branch_map.get(c.branch_id, '') if c.branch_id else ''
+        # 解析 service_modules JSON → service_ids 列表
+        import json as _j
+        try:
+            d['service_ids'] = _j.loads(c.service_modules) if c.service_modules else []
+        except Exception:
+            d['service_ids'] = []
+        result.append(d)
+    return ok(result)
 
 
 @router.post("/consultants")
@@ -438,7 +475,23 @@ def create_consultant(body: ConsultantIn, db: Session = Depends(get_db),
         admin_company = getattr(current, 'company', None)
         if not admin_company or body.company != admin_company:
             raise HTTPException(status_code=403, detail="只能新增本公司顾问")
-    c = Consultant(**body.model_dump())
+    data = body.model_dump()
+    # service_ids → service_modules JSON
+    sids = data.pop('service_ids', None)
+    if sids is not None:
+        import json as _j
+        data['service_modules'] = _j.dumps(sids)
+    c = Consultant(**data)
+    # 自动生成老师推荐码 TATA-XXX
+    if not c.referral_code:
+        import random, string
+        while True:
+            suffix = ''.join(random.choices(string.ascii_uppercase, k=3))
+            code = f'TATA-{suffix}'
+            exist = db.query(Consultant).filter(Consultant.referral_code == code).first()
+            if not exist:
+                c.referral_code = code
+                break
     db.add(c)
     db.commit()
     db.refresh(c)
@@ -455,7 +508,12 @@ def update_consultant(cid: int, body: ConsultantIn, db: Session = Depends(get_db
     # 权限检查：管理员只能改本公司顾问
     check_company_permission(current, c.company or '')
     old_info = f'姓名:{c.name} 公司:{c.company}'
-    for k, v in body.model_dump().items():
+    data = body.model_dump()
+    sids = data.pop('service_ids', None)
+    if sids is not None:
+        import json as _j
+        data['service_modules'] = _j.dumps(sids)
+    for k, v in data.items():
         setattr(c, k, v)
     db.commit()
     db.refresh(c)
@@ -758,27 +816,26 @@ def dashboard(db: Session = Depends(get_db),
     confirmed_refer = db.query(func.count(Referral.id)).filter(Referral.status == "confirmed").scalar() or 0
     refer_conv = round(confirmed_refer / total_refer * 100, 1) if total_refer else 0.0
 
-    # 下店统计：按品牌/企业去重计数 + 总天数
-    # 排期表：按 title 去重 = 品牌数，count = 总天数
+    # 下店统计：一个客户(member_id) = 一家店，天数按排期天数累加
     from sqlalchemy import distinct
-    schedule_brands = (
-        db.query(func.count(distinct(ConsultantSchedule.title)))
-        .filter(ConsultantSchedule.schedule_type == "busy",
-                ConsultantSchedule.title.isnot(None),
-                ConsultantSchedule.title != "",
-                extract("year", ConsultantSchedule.schedule_date) == y,
-                extract("month", ConsultantSchedule.schedule_date) == mo)
+    # 专案工单：按 member_id 去重 = 家数，天数从排期表按 order_id 关联的记录数
+    order_stores = (
+        db.query(func.count(distinct(ServiceOrder.member_id)))
+        .filter(ServiceOrder.status.notin_(["cancelled", "pending"]),
+                extract("year", ServiceOrder.appoint_date) == y,
+                extract("month", ServiceOrder.appoint_date) == mo)
         .scalar() or 0
     )
-    schedule_days = (
+    order_days = (
         db.query(func.count(ConsultantSchedule.id))
         .filter(ConsultantSchedule.schedule_type == "busy",
+                ConsultantSchedule.order_id.isnot(None),
                 extract("year", ConsultantSchedule.schedule_date) == y,
                 extract("month", ConsultantSchedule.schedule_date) == mo)
         .scalar() or 0
     )
-    # 下店预约表：按 member_id 去重
-    booking_brands = (
+    # 下店预约表：按 member_id 去重 = 家数
+    booking_stores = (
         db.query(func.count(distinct(VisitBooking.member_id)))
         .filter(VisitBooking.status.in_(["confirmed", "completed"]),
                 extract("year", VisitBooking.confirmed_date) == y,
@@ -792,8 +849,27 @@ def dashboard(db: Session = Depends(get_db),
                 extract("month", VisitBooking.confirmed_date) == mo)
         .scalar() or 0
     )
-    month_visit = schedule_brands + booking_brands      # 品牌/企业数
-    month_visit_days = schedule_days + booking_days      # 总天数
+    # 手动排期（无order_id关联的）按 title 去重
+    manual_stores = (
+        db.query(func.count(distinct(ConsultantSchedule.title)))
+        .filter(ConsultantSchedule.schedule_type == "busy",
+                ConsultantSchedule.order_id.is_(None),
+                ConsultantSchedule.title.isnot(None),
+                ConsultantSchedule.title != "",
+                extract("year", ConsultantSchedule.schedule_date) == y,
+                extract("month", ConsultantSchedule.schedule_date) == mo)
+        .scalar() or 0
+    )
+    manual_days = (
+        db.query(func.count(ConsultantSchedule.id))
+        .filter(ConsultantSchedule.schedule_type == "busy",
+                ConsultantSchedule.order_id.is_(None),
+                extract("year", ConsultantSchedule.schedule_date) == y,
+                extract("month", ConsultantSchedule.schedule_date) == mo)
+        .scalar() or 0
+    )
+    month_visit = order_stores + booking_stores + manual_stores   # 家数（去重）
+    month_visit_days = order_days + booking_days + manual_days    # 总天数
     reward_pending = db.query(func.count(VisitReward.id)).filter(VisitReward.status == "available").scalar() or 0
 
     return ok({
@@ -810,25 +886,481 @@ def dashboard(db: Session = Depends(get_db),
     })
 
 
+
+# ──────────────────── 数据看板 V2（完整版） ────────────────────
+
+@router.get("/dashboard/v2")
+def dashboard_v2(
+    year: int = None,
+    month: int = None,
+    db: Session = Depends(get_db),
+    _: AdminUser = Depends(get_current_admin),
+):
+    """CRM 完整数据看板
+    四大模块：会员/学员 · 老师 · 财务 · 数据分析
+    """
+    from sqlalchemy import distinct, case, literal_column
+    from models.branch import Branch
+
+    today = date.today()
+    y = year or today.year
+    mo = month or today.month
+
+    # ═══════════ 一、会员/学员 ═══════════
+
+    # 本月服务店家数（按 member_id 去重）
+    month_service_stores = (
+        db.query(func.count(distinct(ServiceOrder.member_id)))
+        .filter(ServiceOrder.status.notin_(["cancelled", "pending"]),
+                extract("year", ServiceOrder.appoint_date) == y,
+                extract("month", ServiceOrder.appoint_date) == mo)
+        .scalar() or 0
+    )
+
+    # 服务天数
+    month_service_days = (
+        db.query(func.count(ConsultantSchedule.id))
+        .filter(ConsultantSchedule.schedule_type == "busy",
+                extract("year", ConsultantSchedule.schedule_date) == y,
+                extract("month", ConsultantSchedule.schedule_date) == mo)
+        .scalar() or 0
+    )
+
+    # 客户推荐数
+    month_referrals = (
+        db.query(func.count(Referral.id))
+        .filter(extract("year", Referral.created_at) == y,
+                extract("month", Referral.created_at) == mo)
+        .scalar() or 0
+    )
+
+    # 课程参加人数
+    month_course_attendees = (
+        db.query(func.count(CourseEnrollment.id))
+        .filter(CourseEnrollment.status.in_(["enrolled", "checked_in", "completed"]),
+                extract("year", CourseEnrollment.created_at) == y,
+                extract("month", CourseEnrollment.created_at) == mo)
+        .scalar() or 0
+    )
+
+    # 权益升级店数（本月 member_tier 发生升级的 member 数 — 用 annual_spending 变化近似）
+    month_tier_upgrades = (
+        db.query(func.count(distinct(Member.id)))
+        .filter(Member.member_type == "annual",
+                extract("year", Member.updated_at) == y,
+                extract("month", Member.updated_at) == mo)
+        .scalar() or 0
+    )
+
+    # ═══════════ 二、老师 ═══════════
+
+    # 本月出差老师人数
+    month_active_consultants = (
+        db.query(func.count(distinct(ConsultantSchedule.consultant_id)))
+        .filter(ConsultantSchedule.schedule_type == "busy",
+                extract("year", ConsultantSchedule.schedule_date) == y,
+                extract("month", ConsultantSchedule.schedule_date) == mo)
+        .scalar() or 0
+    )
+
+    # 老师服务店家数（去重 title/member）
+    consultant_service_stores = (
+        db.query(func.count(distinct(ServiceOrder.member_id)))
+        .filter(ServiceOrder.consultant_id.isnot(None),
+                ServiceOrder.status.notin_(["cancelled", "pending"]),
+                extract("year", ServiceOrder.appoint_date) == y,
+                extract("month", ServiceOrder.appoint_date) == mo)
+        .scalar() or 0
+    )
+
+    # 老师出差天数
+    consultant_travel_days = month_service_days  # 同排期表
+
+    # 老师销售金额
+    consultant_sales = float(
+        db.query(func.coalesce(func.sum(Payment.amount), 0))
+        .filter(Payment.pay_status.in_(["paid", "partial"]),
+                Payment.consultant_id.isnot(None),
+                extract("year", Payment.pay_time) == y,
+                extract("month", Payment.pay_time) == mo)
+        .scalar() or 0
+    )
+
+    # 消耗金额（已完成服务的扣费 = 已完成工单对应的 service price / total_times）
+    from sqlalchemy.orm import aliased
+    SvcAlias = aliased(Service)
+    consumed_amount = float(
+        db.query(func.coalesce(func.sum(
+            case(
+                (SvcAlias.total_times > 0, SvcAlias.price / SvcAlias.total_times),
+                else_=0
+            )
+        ), 0))
+        .select_from(ServiceOrder)
+        .join(SvcAlias, ServiceOrder.service_id == SvcAlias.id)
+        .filter(ServiceOrder.status.in_(["completed", "in_progress", "follow_up"]),
+                extract("year", ServiceOrder.appoint_date) == y,
+                extract("month", ServiceOrder.appoint_date) == mo)
+        .scalar() or 0
+    )
+
+    # 休息天数（schedule_type=off 或 该月总天数 - busy天数）
+    import calendar as cal_mod
+    days_in_month = cal_mod.monthrange(y, mo)[1]
+    # Consultant already imported from models
+    active_consultants = db.query(Consultant).filter(Consultant.status == "active").all()
+    total_consultant_days = len(active_consultants) * days_in_month
+    rest_days = total_consultant_days - month_service_days
+
+    # 老师归属客户数（consultant_id 关联的 members）
+    total_assigned_members = int(
+        db.query(func.count(Member.id))
+        .filter(Member.consultant_id.isnot(None), Member.status == "active")
+        .scalar() or 0
+    )
+
+    # 老师跟进客户数（本月 follow_ups 去重 member_id）
+    from models.followup import FollowUp
+    total_followed_members = int(
+        db.query(func.count(distinct(FollowUp.member_id)))
+        .filter(extract("year", FollowUp.created_at) == y,
+                extract("month", FollowUp.created_at) == mo)
+        .scalar() or 0
+    )
+
+    # ═══════════ 三、财务数据 ═══════════
+
+    branches = db.query(Branch).filter(Branch.status == "active").all()
+    branch_data = []
+    total_sales = 0
+    total_consumed = 0
+    total_debt = 0
+    total_branch_stores = 0
+    total_branch_days = 0
+
+    for b in branches:
+        # 分公司关联的老师（用branch_id）
+        branch_consultants = (
+            db.query(Consultant.id)
+            .filter(Consultant.branch_id == b.id, Consultant.status == "active")
+            .all()
+        )
+        c_ids = [c.id for c in branch_consultants]
+
+        b_sales = 0
+        b_consumed = 0
+        b_debt = 0
+        b_stores = 0
+        b_days = 0
+
+        if c_ids:
+            b_sales = float(
+                db.query(func.coalesce(func.sum(Payment.amount), 0))
+                .filter(Payment.consultant_id.in_(c_ids),
+                        Payment.pay_status.in_(["paid", "partial"]),
+                        extract("year", Payment.pay_time) == y,
+                        extract("month", Payment.pay_time) == mo)
+                .scalar() or 0
+            )
+            b_debt = float(
+                db.query(func.coalesce(func.sum(Payment.debt_amount), 0))
+                .filter(Payment.consultant_id.in_(c_ids),
+                        Payment.pay_status == "partial",
+                        extract("year", Payment.pay_time) == y)
+                .scalar() or 0
+            )
+            b_stores = int(
+                db.query(func.count(distinct(ServiceOrder.member_id)))
+                .filter(ServiceOrder.consultant_id.in_(c_ids),
+                        ServiceOrder.status.notin_(["cancelled", "pending"]),
+                        extract("year", ServiceOrder.appoint_date) == y,
+                        extract("month", ServiceOrder.appoint_date) == mo)
+                .scalar() or 0
+            )
+            b_days = int(
+                db.query(func.count(ConsultantSchedule.id))
+                .filter(ConsultantSchedule.consultant_id.in_(c_ids),
+                        ConsultantSchedule.schedule_type == "busy",
+                        extract("year", ConsultantSchedule.schedule_date) == y,
+                        extract("month", ConsultantSchedule.schedule_date) == mo)
+                .scalar() or 0
+            )
+            b_consumed = float(
+                db.query(func.coalesce(func.sum(
+                    case(
+                        (SvcAlias.total_times > 0, SvcAlias.price / SvcAlias.total_times),
+                        else_=0
+                    )
+                ), 0))
+                .select_from(ServiceOrder)
+                .join(SvcAlias, ServiceOrder.service_id == SvcAlias.id)
+                .filter(ServiceOrder.consultant_id.in_(c_ids),
+                        ServiceOrder.status.in_(["completed", "in_progress", "follow_up"]),
+                        extract("year", ServiceOrder.appoint_date) == y,
+                        extract("month", ServiceOrder.appoint_date) == mo)
+                .scalar() or 0
+            )
+
+        total_sales += b_sales
+        total_consumed += b_consumed
+        total_debt += b_debt
+        total_branch_stores += b_stores
+        total_branch_days += b_days
+
+        b_consultant_count = len(c_ids)
+        branch_data.append({
+            "id": b.id,
+            "name": b.name,
+            "short_name": b.short_name or b.name,
+            "city": b.city or "",
+            "consultant_count": b_consultant_count,
+            "sales": b_sales,
+            "consumed": b_consumed,
+            "debt": b_debt,
+            "stores": b_stores,
+            "travel_days": b_days,
+        })
+
+    # ═══════════ 四、数据分析 ═══════════
+
+    # 试听转化率
+    total_trial = db.query(func.count(Member.id)).filter(Member.member_type == "trial").scalar() or 0
+    total_annual = db.query(func.count(Member.id)).filter(Member.member_type == "annual").scalar() or 0
+    trial_conv = round(total_annual / (total_trial + total_annual) * 100, 1) if (total_trial + total_annual) else 0
+
+    # 推荐转化率
+    total_ref = db.query(func.count(Referral.id)).scalar() or 0
+    confirmed_ref = db.query(func.count(Referral.id)).filter(Referral.status == "confirmed").scalar() or 0
+    referral_conv = round(confirmed_ref / total_ref * 100, 1) if total_ref else 0
+
+    # 客户推荐排名 TOP10
+    referral_rank = (
+        db.query(Member.name, func.count(Referral.id).label("cnt"))
+        .join(Referral, Referral.referrer_id == Member.id)
+        .group_by(Member.id, Member.name)
+        .order_by(func.count(Referral.id).desc())
+        .limit(10)
+        .all()
+    )
+
+    # 老师出差天数排名
+    consultant_days_rank = (
+        db.query(Consultant.name,
+                 func.count(ConsultantSchedule.id).label("days"))
+        .join(ConsultantSchedule, ConsultantSchedule.consultant_id == Consultant.id)
+        .filter(ConsultantSchedule.schedule_type == "busy",
+                extract("year", ConsultantSchedule.schedule_date) == y,
+                extract("month", ConsultantSchedule.schedule_date) == mo)
+        .group_by(Consultant.id, Consultant.name)
+        .order_by(func.count(ConsultantSchedule.id).desc())
+        .all()
+    )
+
+    # 老师服务案例数排名
+    consultant_cases_rank = (
+        db.query(Consultant.name,
+                 func.count(ServiceOrder.id).label("cases"))
+        .join(ServiceOrder, ServiceOrder.consultant_id == Consultant.id)
+        .filter(ServiceOrder.status.notin_(["cancelled", "pending"]),
+                extract("year", ServiceOrder.appoint_date) == y,
+                extract("month", ServiceOrder.appoint_date) == mo)
+        .group_by(Consultant.id, Consultant.name)
+        .order_by(func.count(ServiceOrder.id).desc())
+        .all()
+    )
+
+    # 老师销售排名
+    consultant_sales_rank = (
+        db.query(Consultant.name,
+                 func.coalesce(func.sum(Payment.amount), 0).label("sales"))
+        .join(Payment, Payment.consultant_id == Consultant.id)
+        .filter(Payment.pay_status.in_(["paid", "partial"]),
+                extract("year", Payment.pay_time) == y,
+                extract("month", Payment.pay_time) == mo)
+        .group_by(Consultant.id, Consultant.name)
+        .order_by(func.coalesce(func.sum(Payment.amount), 0).desc())
+        .all()
+    )
+
+    # 老师消耗排名
+    consultant_consumed_rank = (
+        db.query(Consultant.name,
+                 func.count(ServiceOrder.id).label("consumed_count"))
+        .join(ServiceOrder, ServiceOrder.consultant_id == Consultant.id)
+        .filter(ServiceOrder.status.in_(["completed", "in_progress", "follow_up"]),
+                extract("year", ServiceOrder.appoint_date) == y,
+                extract("month", ServiceOrder.appoint_date) == mo)
+        .group_by(Consultant.id, Consultant.name)
+        .order_by(func.count(ServiceOrder.id).desc())
+        .all()
+    )
+
+    # 老师归属客户排名
+    consultant_assigned_rank = (
+        db.query(Consultant.name,
+                 func.count(Member.id).label("cnt"))
+        .join(Member, Member.consultant_id == Consultant.id)
+        .filter(Member.status == "active")
+        .group_by(Consultant.id, Consultant.name)
+        .order_by(func.count(Member.id).desc())
+        .all()
+    )
+
+    # 老师跟进客户排名（本月）
+    consultant_followed_rank_raw = (
+        db.query(FollowUp.admin_name,
+                 func.count(distinct(FollowUp.member_id)).label("cnt"))
+        .filter(extract("year", FollowUp.created_at) == y,
+                extract("month", FollowUp.created_at) == mo)
+        .group_by(FollowUp.admin_name)
+        .order_by(func.count(distinct(FollowUp.member_id)).desc())
+        .all()
+    )
+
+    # 老师成交率：归属客户中有付款记录的比例
+    consultant_conversion = []
+    for c in active_consultants:
+        assigned = db.query(func.count(Member.id)).filter(
+            Member.consultant_id == c.id, Member.status == "active"
+        ).scalar() or 0
+        if assigned == 0:
+            continue
+        paid = db.query(func.count(distinct(Payment.member_id))).filter(
+            Payment.consultant_id == c.id,
+            Payment.pay_status.in_(["paid", "partial"])
+        ).scalar() or 0
+        rate = round(paid / assigned * 100, 1) if assigned else 0
+        consultant_conversion.append({
+            "name": c.name,
+            "assigned": assigned,
+            "paid": paid,
+            "rate": rate,
+        })
+    consultant_conversion.sort(key=lambda x: x["rate"], reverse=True)
+
+    # 分公司排名（按销售额）
+    branch_rank = sorted(branch_data, key=lambda x: x["sales"], reverse=True)
+
+    return ok({
+        "year": y,
+        "month": mo,
+        "member": {
+            "month_service_stores": int(month_service_stores),
+            "month_service_days": int(month_service_days),
+            "month_referrals": int(month_referrals),
+            "month_course_attendees": int(month_course_attendees),
+            "month_tier_upgrades": int(month_tier_upgrades),
+        },
+        "consultant": {
+            "active_count": int(month_active_consultants),
+            "service_stores": int(consultant_service_stores),
+            "travel_days": int(consultant_travel_days),
+            "sales": consultant_sales,
+            "consumed": consumed_amount,
+            "rest_days": max(0, rest_days),
+            "assigned_members": total_assigned_members,
+            "followed_members": total_followed_members,
+        },
+        "finance": {
+            "total_sales": total_sales,
+            "total_consumed": total_consumed,
+            "total_debt": total_debt,
+            "total_stores": total_branch_stores,
+            "total_travel_days": total_branch_days,
+            "branches": branch_data,
+        },
+        "analysis": {
+            "trial_conv": trial_conv,
+            "referral_conv": referral_conv,
+            "referral_rank": [{"name": r[0], "count": r[1]} for r in referral_rank],
+            "consultant_days_rank": [{"name": r[0], "days": r[1]} for r in consultant_days_rank],
+            "consultant_cases_rank": [{"name": r[0], "cases": r[1]} for r in consultant_cases_rank],
+            "consultant_sales_rank": [{"name": r[0], "sales": float(r[1])} for r in consultant_sales_rank],
+            "consultant_consumed_rank": [{"name": r[0], "count": r[1]} for r in consultant_consumed_rank],
+            "branch_rank": branch_rank,
+            "consultant_assigned_rank": [{"name": r[0], "count": r[1]} for r in consultant_assigned_rank],
+            "consultant_followed_rank": [{"name": r[0] or "", "count": r[1]} for r in consultant_followed_rank_raw],
+            "consultant_conversion": consultant_conversion,
+        },
+    })
+
+
 # ──────────────────── 菜单徽标 ────────────────────
 
 @router.get("/stats/menu-badges")
 def menu_badges(db: Session = Depends(get_db),
                 _: AdminUser = Depends(get_current_admin)):
     """返回侧栏菜单徽标数字"""
+    from models.service import ServiceOrder
+    from models.course_session import CourseSession
+    import datetime
+
+    # 预约管理 - 待确认
     pending_bookings = (
         db.query(func.count(VisitBooking.id))
         .filter(VisitBooking.status == "pending")
         .scalar() or 0
     )
+    # 权益台账 - 可用
     pending_rewards = (
         db.query(func.count(VisitReward.id))
         .filter(VisitReward.status == "available")
         .scalar() or 0
     )
+    # 服务工单 - 进行中
+    try:
+        active_orders = (
+            db.query(func.count(ServiceOrder.id))
+            .filter(ServiceOrder.status.in_(["pending", "accepted", "confirmed", "in_progress"]))
+            .scalar() or 0
+        )
+    except:
+        active_orders = 0
+    # 课程场次 - 报名中
+    try:
+        active_sessions = (
+            db.query(func.count(CourseSession.id))
+            .filter(CourseSession.status == "open")
+            .scalar() or 0
+        )
+    except:
+        active_sessions = 0
+    # 老师排期 - 进行中/已确认
+    try:
+        active_schedules = (
+            db.query(func.count(VisitBooking.id))
+            .filter(VisitBooking.status.in_(["confirmed", "in_progress"]))
+            .scalar() or 0
+        )
+    except:
+        active_schedules = 0
+    # 会员 - 7天内新注册
+    try:
+        seven_days_ago = datetime.datetime.now() - datetime.timedelta(days=7)
+        new_members = (
+            db.query(func.count(Member.id))
+            .filter(Member.created_at >= seven_days_ago)
+            .scalar() or 0
+        )
+    except:
+        new_members = 0
+    # 老师审核 - 待审核
+    try:
+        pending_approval = (
+            db.query(func.count(AdminUser.id))
+            .filter(AdminUser.role == "pending")
+            .scalar() or 0
+        )
+    except:
+        pending_approval = 0
     return ok({
         "bookings": int(pending_bookings),
         "rewards": int(pending_rewards),
+        "service-orders": int(active_orders),
+        "course-sessions": int(active_sessions),
+        "schedules": int(active_schedules),
+        "members": int(new_members),
+        "consultant-approval": int(pending_approval),
     })
 
 

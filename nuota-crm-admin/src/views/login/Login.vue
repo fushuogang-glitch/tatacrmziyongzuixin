@@ -16,11 +16,23 @@ const regForm = reactive({
   company: '',
 });
 
-const companies = [
-  '上海嘉塔诺塔管理咨询有限公司',
-  '武汉塔塔咨询有限公司',
-  '南京塔塔咨询有限公司',
-];
+const companies = ref<string[]>([]);
+
+// 从后端拉分公司列表
+async function loadBranches() {
+  try {
+    const res: any = await API.get('/admin/branches/public');
+    const list = res?.data || res || [];
+    companies.value = list.map((b: any) => b.name || b.short_name);
+  } catch {
+    companies.value = [
+      '上海嘉塔诺塔管理咨询有限公司',
+      '武汉塔塔咨询有限公司',
+      '南京塔塔咨询有限公司',
+    ];
+  }
+}
+loadBranches();
 
 // 统一登录：先尝试 admin_users 表，再尝试 consultant 表
 async function onLogin() {

@@ -8,7 +8,7 @@ const user = useUserStore();
 const loading = ref(false);
 const activeTab = ref('pending');
 const rows = ref<any[]>([]);
-const reviewDialog = reactive({ visible: false, row: null as any, action: '', note: '' });
+const reviewDialog = reactive({ visible: false, row: null as any, action: '', note: '', level: 'trainee', position: '', branch_id: null as number | null });
 const transferDialog = reactive({
   visible: false,
   fromId: 0,
@@ -17,6 +17,23 @@ const transferDialog = reactive({
   memberIds: null as number[] | null,
 });
 const consultants = ref<any[]>([]);
+const branches = ref<any[]>([]);
+
+const levelOptions = [
+  { value: 'probation', label: '考核期 P' },
+  { value: 'trainee', label: '培训期 T' },
+  { value: 'pm', label: '项目经理 PM' },
+  { value: 'pd', label: '项目总监 PD' },
+  { value: 'jp', label: '初级合伙人 JP' },
+  { value: 'mp', label: '中级合伙人 MP' },
+  { value: 'sp', label: '高级合伙人 SP' },
+  { value: 'fp', label: '创始合伙人 FP' },
+];
+
+const positionOptions = [
+  '人力组织总监', '运营总监', '教学总监',
+  '品牌总监', '客服总监', '技术总监', '分公司负责人'
+];
 
 import { reactive } from 'vue';
 
@@ -24,7 +41,7 @@ async function loadApps(status = 'pending') {
   loading.value = true;
   try {
     const res: any = await API.get(`/admin/consultant-auth/applications?status=${status}`);
-    rows.value = res.data || [];
+    rows.value = Array.isArray(res) ? res : (res?.data || []);
   } catch (e) {
     ElMessage.error('加载失败');
   } finally {
@@ -35,7 +52,14 @@ async function loadApps(status = 'pending') {
 async function loadConsultants() {
   try {
     const res: any = await API.get('/admin/consultants');
-    consultants.value = res.data || [];
+    consultants.value = Array.isArray(res) ? res : (res?.data || []);
+  } catch { }
+}
+
+async function loadBranches() {
+  try {
+    const res: any = await API.get('/admin/branches');
+    branches.value = Array.isArray(res) ? res : (res?.data || []);
   } catch { }
 }
 
@@ -43,15 +67,23 @@ function openReview(row: any, action: string) {
   reviewDialog.row = row;
   reviewDialog.action = action;
   reviewDialog.note = '';
+  reviewDialog.level = 'trainee';
+  reviewDialog.position = '';
+  reviewDialog.branch_id = null;
   reviewDialog.visible = true;
+  loadBranches();
 }
 
 async function submitReview() {
   loading.value = true;
   try {
-    await API.post(`/admin/consultant-auth/applications/${reviewDialog.row.id}/review`, {
+    const source = reviewDialog.row.source || 'application';
+    await API.post(`/admin/consultant-auth/applications/${reviewDialog.row.id}/review?source=${source}`, {
       action: reviewDialog.action,
       note: reviewDialog.note,
+      level: reviewDialog.level,
+      position: reviewDialog.position || null,
+      branch_id: reviewDialog.branch_id || null,
     });
     ElMessage.success(reviewDialog.action === 'approve' ? '已通过审核' : '已拒绝');
     reviewDialog.visible = false;
@@ -112,6 +144,28 @@ async function genInviteCode(consultantId: number, name: string) {
   }
 }
 
+async function departConsultant(row: any) {
+  const activeList = consultants.value.filter(c => c.id !== row.id && c.status === 'active');
+  let toId: number | null = null;
+  if (activeList.length > 0) {
+    const { value } = await ElMessageBox.prompt(
+      `确认将【${row.name}】标记为离职？\n数据保留，客户可自动转绑。\n输入接手老师ID（可留空）：`,
+      '老师离职', { type: 'warning', inputValue: '' }
+    );
+    toId = value ? parseInt(value) : null;
+  } else {
+    await ElMessageBox.confirm(`确认将【${row.name}】标记为离职？数据将保留。`, '老师离职', { type: 'warning' });
+  }
+  loading.value = true;
+  try {
+    const res: any = await API.post(`/admin/consultant-auth/depart/${row.id}`, { to_consultant_id: toId });
+    ElMessage.success(res?.data?.msg || '已标记离职');
+    loadConsultants();
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.detail || '操作失败');
+  } finally { loading.value = false; }
+}
+
 onMounted(() => {
   loadApps('pending');
   loadConsultants();
@@ -160,17 +214,33 @@ onMounted(() => {
           </el-tag>
         </template>
       </el-table-column>
-      <el-table-column label="操作" width="200">
+      <el-table-column label="操作" width="260">
         <template #default="{ row }">
-          <el-button size="small" @click="genInviteCode(row.id, row.name)">邀请码</el-button>
+          <el-button size="small" @click="genInviteCode(row.id, row.name)">推荐码</el-button>
           <el-button size="small" type="warning" @click="openTransfer(row)">转绑客户</el-button>
+          <el-button size="small" type="danger" @click="departConsultant(row)">离职</el-button>
         </template>
       </el-table-column>
     </el-table>
 
     <!-- 审核弹窗 -->
-    <el-dialog v-model="reviewDialog.visible" :title="reviewDialog.action === 'approve' ? '通过申请' : '拒绝申请'" width="400px">
+    <el-dialog v-model="reviewDialog.visible" :title="reviewDialog.action === 'approve' ? '通过申请' : '拒绝申请'" width="480px">
       <el-form label-position="top">
+        <el-form-item v-if="reviewDialog.action === 'approve'" label="归属分公司">
+          <el-select v-model="reviewDialog.branch_id" placeholder="请选择分公司" style="width:100%" clearable>
+            <el-option v-for="b in branches" :key="b.id" :label="b.name" :value="b.id" />
+          </el-select>
+        </el-form-item>
+        <el-form-item v-if="reviewDialog.action === 'approve'" label="级别">
+          <el-select v-model="reviewDialog.level" style="width:100%">
+            <el-option v-for="l in levelOptions" :key="l.value" :label="l.label" :value="l.value" />
+          </el-select>
+        </el-form-item>
+        <el-form-item v-if="reviewDialog.action === 'approve'" label="岗位（可选）">
+          <el-select v-model="reviewDialog.position" placeholder="可不选" style="width:100%" clearable>
+            <el-option v-for="p in positionOptions" :key="p" :label="p" :value="p" />
+          </el-select>
+        </el-form-item>
         <el-form-item label="备注（可选）">
           <el-input v-model="reviewDialog.note" type="textarea" :rows="3" placeholder="审核说明" />
         </el-form-item>

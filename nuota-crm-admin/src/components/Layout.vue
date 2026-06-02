@@ -22,35 +22,29 @@ const menuGroups = [
     ],
   },
   {
-    label: '教学服务', icon: 'Reading',
+    label: '项目管理', icon: 'Briefcase',
     items: [
       { path: '/course-sessions', title: '课程场次', icon: 'Calendar', adminOnly: true },
       { path: '/services', title: '专案服务', icon: 'Briefcase', adminOnly: true },
       { path: '/service-orders', title: '服务工单', icon: 'Document' },
-
     ],
   },
   {
     label: '会员运营', icon: 'UserFilled',
     items: [
+      { path: '/customers', title: '客户管理', icon: 'OfficeBuilding' },
       { path: '/members', title: '会员/学员', icon: 'User' },
       { path: '/payments', title: '收款明细', icon: 'Money' },
       { path: '/referrals', title: '推荐管理', icon: 'Share', adminOnly: true },
       { path: '/rewards', title: '权益台账', icon: 'Present', adminOnly: true },
-      { path: '/quota', title: '名额管理', icon: 'PieChart', adminOnly: true },
-    ],
-  },
-  {
-    label: '内容运营', icon: 'Document',
-    items: [
-      { path: '/articles', title: '内容管理', icon: 'Notebook' },
     ],
   },
   {
     label: '下店执案', icon: 'MapLocation',
     items: [
-      { path: '/schedules', title: '老师排期', icon: 'Calendar' },
       { path: '/bookings', title: '预约管理', icon: 'Location' },
+      { path: '/schedules', title: '老师排期', icon: 'Calendar' },
+      { path: '/quota', title: '名额管理', icon: 'PieChart', adminOnly: true },
     ],
   },
   {
@@ -59,6 +53,15 @@ const menuGroups = [
       { path: '/branches', title: '分公司管理', icon: 'OfficeBuilding', adminOnly: true },
       { path: '/consultants', title: '老师管理', icon: 'Avatar', adminOnly: true },
       { path: '/consultant-approval', title: '老师审核', icon: 'CircleCheck', adminOnly: true },
+      { path: '/salary', title: '工资管理', icon: 'Money', adminOnly: true },
+      { path: '/promotion', title: '晋级管理', icon: 'TrendCharts', adminOnly: true },
+    ],
+  },
+  {
+    label: '内容管理', icon: 'Document',
+    items: [
+      { path: '/articles', title: '内容管理', icon: 'Notebook' },
+      { path: '/banners', title: '广告位管理', icon: 'Picture', adminOnly: true },
     ],
   },
   {
@@ -105,20 +108,48 @@ function handleLogout() {
   router.push('/login');
 }
 
-// 角标路径映射
-const badgePathMap: Record<string, string> = {
-  '/bookings': 'bookings',
-  '/service-orders': 'service-orders',
-  '/schedules': 'schedules',
+// 角标路径映射：red = 待处理（红），green = 进行中（绿）
+const badgePathMap: Record<string, { red: string; green?: string }> = {
+  '/bookings': { red: 'bookings' },
+  '/service-orders': { red: 'service-orders', green: 'service-orders-active' },
+  '/schedules': { red: 'schedules', green: 'schedules-active' },
+  '/course-sessions': { red: 'course-sessions' },
+  '/members': { red: 'members' },
+  '/rewards': { red: 'rewards' },
+  '/consultant-approval': { red: 'consultant-approval' },
 };
 
 function getBadge(path: string): number {
-  const key = badgePathMap[path];
-  return key ? (badges.value[key] || 0) : 0;
+  const keys = badgePathMap[path];
+  if (!keys) return 0;
+  return (badges.value[keys.red] || 0) + (badges.value[keys.green || ''] || 0);
+}
+
+function getBadgeColor(path: string): string {
+  const keys = badgePathMap[path];
+  if (!keys) return 'red';
+  const red = badges.value[keys.red] || 0;
+  const green = badges.value[keys.green || ''] || 0;
+  if (red > 0) return 'red';
+  if (green > 0) return 'green';
+  return 'red';
+}
+
+function getBadgeRed(path: string): number {
+  const keys = badgePathMap[path];
+  return keys ? (badges.value[keys.red] || 0) : 0;
+}
+
+function getBadgeGreen(path: string): number {
+  const keys = badgePathMap[path];
+  return keys?.green ? (badges.value[keys.green] || 0) : 0;
 }
 
 function getGroupBadge(items: any[]): number {
-  return items.reduce((sum: number, m: any) => sum + getBadge(m.path), 0);
+  return items.reduce((sum: number, m: any) => sum + getBadgeRed(m.path), 0);
+}
+function getGroupBadgeGreen(items: any[]): number {
+  return items.reduce((sum: number, m: any) => sum + getBadgeGreen(m.path), 0);
 }
 
 async function loadBadges() {
@@ -148,7 +179,8 @@ onMounted(() => {
             <el-icon><component :is="g.items[0].icon" /></el-icon>
             <template #title>
               <span style="flex:1">{{ g.items[0].title }}</span>
-              <span v-if="getBadge(g.items[0].path) > 0" class="menu-num">{{ getBadge(g.items[0].path) > 99 ? '99+' : getBadge(g.items[0].path) }}</span>
+              <span v-if="getBadgeRed(g.items[0].path) > 0" class="menu-num menu-num-red">{{ getBadgeRed(g.items[0].path) > 99 ? '99+' : getBadgeRed(g.items[0].path) }}</span>
+              <span v-if="getBadgeGreen(g.items[0].path) > 0" class="menu-num menu-num-green">{{ getBadgeGreen(g.items[0].path) > 99 ? '99+' : getBadgeGreen(g.items[0].path) }}</span>
             </template>
           </el-menu-item>
           <!-- 多项时折叠 -->
@@ -156,13 +188,15 @@ onMounted(() => {
             <template #title>
               <el-icon><component :is="g.icon" /></el-icon>
               <span style="flex:1">{{ g.label }}</span>
-              <span v-if="getGroupBadge(g.items) > 0" class="menu-num">{{ getGroupBadge(g.items) > 99 ? '99+' : getGroupBadge(g.items) }}</span>
+              <span v-if="getGroupBadge(g.items) > 0" class="menu-num menu-num-red">{{ getGroupBadge(g.items) > 99 ? '99+' : getGroupBadge(g.items) }}</span>
+              <span v-else-if="getGroupBadgeGreen(g.items) > 0" class="menu-num menu-num-green">{{ getGroupBadgeGreen(g.items) > 99 ? '99+' : getGroupBadgeGreen(g.items) }}</span>
             </template>
             <el-menu-item v-for="m in g.items" :key="m.path" :index="m.path">
               <el-icon><component :is="m.icon" /></el-icon>
               <template #title>
                 <span style="flex:1">{{ m.title }}</span>
-                <span v-if="getBadge(m.path) > 0" class="menu-num">{{ getBadge(m.path) > 99 ? '99+' : getBadge(m.path) }}</span>
+                <span v-if="getBadgeRed(m.path) > 0" class="menu-num menu-num-red">{{ getBadgeRed(m.path) > 99 ? '99+' : getBadgeRed(m.path) }}</span>
+                <span v-if="getBadgeGreen(m.path) > 0" class="menu-num menu-num-green">{{ getBadgeGreen(m.path) > 99 ? '99+' : getBadgeGreen(m.path) }}</span>
               </template>
             </el-menu-item>
           </el-sub-menu>
@@ -215,5 +249,7 @@ onMounted(() => {
 .title { font-size: 16px; font-weight: 600; }
 .user { color: #606266; font-size: 14px; cursor: pointer; }
 .main { padding: 20px; background: #f5f7fa; }
-.menu-num { display: inline-flex; align-items: center; justify-content: center; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 10px; background: #f56c6c; color: #fff; font-size: 11px; font-weight: 500; line-height: 1; margin-left: 6px; }
+.menu-num { display: inline-flex; align-items: center; justify-content: center; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 10px; color: #fff; font-size: 11px; font-weight: 500; line-height: 1; margin-left: 6px; }
+.menu-num-red { background: #f56c6c; }
+.menu-num-green { background: #67c23a; }
 </style>

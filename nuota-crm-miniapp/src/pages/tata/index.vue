@@ -201,7 +201,7 @@ onMounted(async () => {
     const member = uni.getStorageSync('member');
     if (member?.id) {
       const r: any = await api.checkAgreement(member.id);
-      if (!r.data?.signed) {
+      if (!r?.signed) {
         uni.redirectTo({ url: '/pages/agreement/sign' });
       }
     }

@@ -77,7 +77,7 @@
             'has-event': cell.events.length > 0,
           }]"
           @click="selectDate(cell)">
-          <div class="date-num">{{ cell.day }}</div>
+          <div class="date-num">{{ cell.day }}<span :class="['lunar-text', { 'lunar-festival': cell.isFestival }]">{{ cell.lunar }}</span></div>
           <!-- 事件点/条 -->
           <div class="event-list">
             <template v-for="(ev, i) in cell.events.slice(0, 3)" :key="ev.id">
@@ -219,6 +219,77 @@ const weekdays = ['日', '一', '二', '三', '四', '五', '六']
 const monthNames = ['一月', '二月', '三月', '四月', '五月', '六月', '七月', '八月', '九月', '十月', '十一月', '十二月']
 const hours = [8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
 
+// ─── 农历计算 ───
+const lunarInfo = [0x04bd8,0x04ae0,0x0a570,0x054d5,0x0d260,0x0d950,0x16554,0x056a0,0x09ad0,0x055d2,0x04ae0,0x0a5b6,0x0a4d0,0x0d250,0x1d255,0x0b540,0x0d6a0,0x0ada2,0x095b0,0x14977,0x04970,0x0a4b0,0x0b4b5,0x06a50,0x06d40,0x1ab54,0x02b60,0x09570,0x052f2,0x04970,0x06566,0x0d4a0,0x0ea50,0x06e95,0x05ad0,0x02b60,0x186e3,0x092e0,0x1c8d7,0x0c950,0x0d4a0,0x1d8a6,0x0b550,0x056a0,0x1a5b4,0x025d0,0x092d0,0x0d2b2,0x0a950,0x0b557,0x06ca0,0x0b550,0x15355,0x04da0,0x0a5b0,0x14573,0x052b0,0x0a9a8,0x0e950,0x06aa0,0x0aea6,0x0ab50,0x04b60,0x0aae4,0x0a570,0x05260,0x0f263,0x0d950,0x05b57,0x056a0,0x096d0,0x04dd5,0x04ad0,0x0a4d0,0x0d4d4,0x0d250,0x0d558,0x0b540,0x0b6a0,0x195a6,0x095b0,0x049b0,0x0a974,0x0a4b0,0x0b27a,0x06a50,0x06d40,0x0af46,0x0ab60,0x09570,0x04af5,0x04970,0x064b0,0x074a3,0x0ea50,0x06b58,0x05ac0,0x0ab60,0x096d5,0x092e0,0x0c960,0x0d954,0x0d4a0,0x0da50,0x07552,0x056a0,0x0abb7,0x025d0,0x092d0,0x0cab5,0x0a950,0x0b4a0,0x0baa4,0x0ad50,0x055d9,0x04ba0,0x0a5b0,0x15176,0x052b0,0x0a930,0x07954,0x06aa0,0x0ad50,0x05b52,0x04b60,0x0a6e6,0x0a4e0,0x0d260,0x0ea65,0x0d530,0x05aa0,0x076a3,0x096d0,0x04afb,0x04ad0,0x0a4d0,0x1d0b6,0x0d250,0x0d520,0x0dd45,0x0b5a0,0x056d0,0x055b2,0x049b0,0x0a577,0x0a4b0,0x0aa50,0x1b255,0x06d20,0x0ada0,0x14b63,0x09370,0x049f8,0x04970,0x064b0,0x168a6,0x0ea50,0x06b20,0x1a6c4,0x0aae0,0x092e0,0x0d2e3,0x0c960,0x0d557,0x0d4a0,0x0da50,0x05d55,0x056a0,0x0a6d0,0x055d4,0x052d0,0x0a9b8,0x0a950,0x0b4a0,0x0b6a6,0x0ad50,0x055a0,0x0aba4,0x0a5b0,0x052b0,0x0b273,0x06930,0x07337,0x06aa0,0x0ad50,0x14b55,0x04b60,0x0a570,0x054e4,0x0d160,0x0e968,0x0d520,0x0daa0,0x16aa6,0x056d0,0x04ae0,0x0a9d4,0x0a4d0,0x0d150,0x0f252,0x0d520]
+const Gan = ['甲','乙','丙','丁','戊','己','庚','辛','壬','癸']
+const Zhi = ['子','丑','寅','卯','辰','巳','午','未','申','酉','戌','亥']
+const Animals = ['鼠','牛','虎','兔','龙','蛇','马','羊','猴','鸡','狗','猪']
+const lunarMonthNames = ['正','二','三','四','五','六','七','八','九','十','冬','腊']
+const lunarDayNames = ['初一','初二','初三','初四','初五','初六','初七','初八','初九','初十','十一','十二','十三','十四','十五','十六','十七','十八','十九','二十','廿一','廿二','廿三','廿四','廿五','廿六','廿七','廿八','廿九','三十']
+
+// 传统节日
+const lunarFestivals: Record<string, string> = {
+  '1-1': '春节', '1-15': '元宵', '2-2': '龙抬头', '5-5': '端午',
+  '7-7': '七夕', '7-15': '中元', '8-15': '中秋', '9-9': '重阳',
+  '12-8': '腊八', '12-30': '除夕',
+}
+const solarFestivals: Record<string, string> = {
+  '1-1': '元旦', '2-14': '情人节', '3-8': '妇女节', '3-12': '植树节',
+  '4-1': '愚人节', '5-1': '劳动节', '5-4': '青年节', '6-1': '儿童节',
+  '7-1': '建党节', '8-1': '建军节', '9-10': '教师节', '10-1': '国庆节',
+  '12-25': '圣诞节',
+}
+
+function lYearDays(y: number) {
+  let s = 348
+  for (let i = 0x8000; i > 0x8; i >>= 1) s += (lunarInfo[y - 1900] & i) ? 1 : 0
+  return s + leapDays(y)
+}
+function leapMonth(y: number) { return lunarInfo[y - 1900] & 0xf }
+function leapDays(y: number) {
+  if (leapMonth(y)) return (lunarInfo[y - 1900] & 0x10000) ? 30 : 29
+  return 0
+}
+function monthDays(y: number, m: number) { return (lunarInfo[y - 1900] & (0x10000 >> m)) ? 30 : 29 }
+
+function solarToLunar(sy: number, sm: number, sd: number) {
+  const baseDate = new Date(1900, 0, 31)
+  const objDate = new Date(sy, sm - 1, sd)
+  let offset = Math.floor((objDate.getTime() - baseDate.getTime()) / 86400000)
+  let ly = 1900
+  let temp = 0
+  for (; ly < 2101 && offset > 0; ly++) {
+    temp = lYearDays(ly)
+    offset -= temp
+  }
+  if (offset < 0) { offset += temp; ly-- }
+  const lm_leap = leapMonth(ly)
+  let isLeap = false
+  let lm = 1
+  for (; lm < 13 && offset > 0; lm++) {
+    if (lm_leap > 0 && lm === lm_leap + 1 && !isLeap) {
+      --lm; isLeap = true; temp = leapDays(ly)
+    } else { temp = monthDays(ly, lm) }
+    if (isLeap && lm === lm_leap + 1) isLeap = false
+    offset -= temp
+  }
+  if (offset === 0 && lm_leap > 0 && lm === lm_leap + 1) {
+    if (isLeap) isLeap = false; else { isLeap = true; --lm }
+  }
+  if (offset < 0) { offset += temp; --lm }
+  const ld = offset + 1
+  // 节日
+  const lunarKey = `${lm}-${ld}`
+  const solarKey = `${sm}-${sd}`
+  const festival = lunarFestivals[lunarKey] || solarFestivals[solarKey] || ''
+  // 显示文字：优先节日，其次初一显示月名，其次日名
+  let text = ''
+  if (festival) text = festival
+  else if (ld === 1) text = lunarMonthNames[lm - 1] + '月'
+  else text = lunarDayNames[ld - 1]
+  return { year: ly, month: lm, day: ld, isLeap, text, festival }
+}
+
 // ─── 工具：本地日期格式化（避免UTC偏移） ───
 function toLocalDateStr(d: Date): string {
   const y = d.getFullYear()
@@ -261,7 +332,9 @@ const calendarCells = computed(() => {
   for (let i = startWeekday - 1; i >= 0; i--) {
     const d = new Date(year.value, month.value - 2, prevLastDay - i)
     const ds = toLocalDateStr(d)
-    cells.push({ key: `p-${ds}`, day: prevLastDay - i, dateStr: ds, inMonth: false, isToday: false, events: [] })
+    const pdt = new Date(year.value, month.value - 2, prevLastDay - i)
+    const pLunar = solarToLunar(pdt.getFullYear(), pdt.getMonth() + 1, pdt.getDate())
+    cells.push({ key: `p-${ds}`, day: prevLastDay - i, dateStr: ds, inMonth: false, isToday: false, events: [], lunar: pLunar.text, isFestival: !!pLunar.festival })
   }
 
   // 当月
@@ -270,7 +343,8 @@ const calendarCells = computed(() => {
     const dt = new Date(year.value, month.value - 1, d)
     const ds = toLocalDateStr(dt)
     const evs = allEvents.value.filter(e => e.date === ds)
-    cells.push({ key: ds, day: d, dateStr: ds, inMonth: true, isToday: ds === todayStr, events: evs })
+    const lunarData = solarToLunar(year.value, month.value, d)
+    cells.push({ key: ds, day: d, dateStr: ds, inMonth: true, isToday: ds === todayStr, events: evs, lunar: lunarData.text, isFestival: !!lunarData.festival })
   }
 
   // 填充下月头（补足6行）
@@ -279,7 +353,9 @@ const calendarCells = computed(() => {
   while (cells.length < totalCells) {
     const dt = new Date(year.value, month.value, nextDay)
     const ds = toLocalDateStr(dt)
-    cells.push({ key: `n-${ds}`, day: nextDay, dateStr: ds, inMonth: false, isToday: false, events: [] })
+    const ndt = new Date(year.value, month.value, nextDay)
+    const nLunar = solarToLunar(ndt.getFullYear(), ndt.getMonth() + 1, ndt.getDate())
+    cells.push({ key: `n-${ds}`, day: nextDay, dateStr: ds, inMonth: false, isToday: false, events: [], lunar: nLunar.text, isFestival: !!nLunar.festival })
     nextDay++
   }
 
@@ -397,7 +473,7 @@ onMounted(loadData)
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 16px 24px;
+  padding: 8px 16px;
   border-bottom: 1px solid #2a2a2a;
   background: #111;
 }
@@ -459,12 +535,12 @@ onMounted(loadData)
 /* ── 月视图 ── */
 .calendar-grid { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
 .week-header { display: grid; grid-template-columns: repeat(7, 1fr); border-bottom: 1px solid #222; }
-.week-cell { padding: 10px 0; text-align: center; font-size: 12px; color: #666; letter-spacing: 0.1em; }
+.week-cell { padding: 6px 0; text-align: center; font-size: 12px; color: #666; letter-spacing: 0.1em; }
 .date-grid { flex: 1; display: grid; grid-template-columns: repeat(7, 1fr); grid-auto-rows: 1fr; overflow-y: auto; }
 
 .date-cell {
   border-right: 1px solid #1a1a1a; border-bottom: 1px solid #1a1a1a;
-  padding: 8px; cursor: pointer; min-height: 100px;
+  padding: 4px 6px; cursor: pointer; min-height: 0;
   transition: background 0.15s;
 }
 .date-cell:hover { background: #161616; }
@@ -473,7 +549,10 @@ onMounted(loadData)
 .date-cell.today .date-num { color: #c9a96e; font-weight: 700; }
 .date-cell.selected { background: rgba(201, 169, 110, 0.12); }
 
-.date-num { font-size: 13px; color: #888; margin-bottom: 6px; }
+.date-num { font-size: 18px; font-weight: 600; color: #aaa; margin-bottom: 4px; display: flex; align-items: baseline; gap: 6px; }
+.lunar-text { font-size: 11px; font-weight: 400; color: #666; }
+.date-cell.today .lunar-text { color: #c9a96e; }
+.lunar-festival { color: #e84c4c !important; font-weight: 500; }
 .event-list { display: flex; flex-direction: column; gap: 3px; }
 .event-chip {
   display: flex; align-items: center; gap: 4px;
