@@ -97,6 +97,9 @@ def _ensure_schema():
             profile_type VARCHAR(20) DEFAULT 'customer',
             monthly_fortune_month VARCHAR(7),
             monthly_fortune TEXT,
+            current_liuyue VARCHAR(30),
+            good_events_analysis TEXT,
+            caution_notes TEXT,
             auspicious_keyword VARCHAR(50),
             color_personality VARCHAR(100),
             mbti VARCHAR(20),
@@ -124,6 +127,9 @@ def _ensure_schema():
         "CREATE INDEX IF NOT EXISTS ix_member_daily_profiles_member_id ON member_daily_profiles(member_id)",
         "ALTER TABLE member_daily_profiles ADD COLUMN IF NOT EXISTS profile_type VARCHAR(20) DEFAULT 'customer'",
         "ALTER TABLE member_daily_profiles ADD COLUMN IF NOT EXISTS bazi_analysis TEXT",
+        "ALTER TABLE member_daily_profiles ADD COLUMN IF NOT EXISTS current_liuyue VARCHAR(30)",
+        "ALTER TABLE member_daily_profiles ADD COLUMN IF NOT EXISTS good_events_analysis TEXT",
+        "ALTER TABLE member_daily_profiles ADD COLUMN IF NOT EXISTS caution_notes TEXT",
     ]
     with engine.begin() as conn:
         for s in stmts:

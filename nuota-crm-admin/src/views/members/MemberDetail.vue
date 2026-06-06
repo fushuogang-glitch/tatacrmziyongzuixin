@@ -26,6 +26,9 @@ const dailyProfile = reactive<any>({
   birth_time: '',
   bazi_text: '',
   auspicious_keyword: '',
+  current_liuyue: '',
+  good_events_analysis: '',
+  caution_notes: '',
   color_personality: '',
   mbti: '',
   bazi_analysis: '',
@@ -157,6 +160,9 @@ async function saveDailyProfile() {
       bazi_text: dailyProfile.bazi_text || null,
       profile_type: dailyProfile.profile_type || 'customer',
       auspicious_keyword: dailyProfile.auspicious_keyword || null,
+      current_liuyue: dailyProfile.current_liuyue || null,
+      good_events_analysis: dailyProfile.good_events_analysis || null,
+      caution_notes: dailyProfile.caution_notes || null,
       color_personality: dailyProfile.color_personality || null,
       mbti: dailyProfile.mbti || null,
       bazi_analysis: dailyProfile.bazi_analysis || null,
@@ -381,6 +387,9 @@ onMounted(() => {
           <el-form-item label="吉祥词">
             <el-input v-model="dailyProfile.auspicious_keyword" placeholder="可选：固定展示给客户的词" />
           </el-form-item>
+          <el-form-item label="流月">
+            <el-input v-model="dailyProfile.current_liuyue" placeholder="如：丙午月 / 丁未月" />
+          </el-form-item>
           <el-form-item label="颜色性格">
             <el-input v-model="dailyProfile.color_personality" placeholder="如：金色行动型 / 蓝色理性型" />
           </el-form-item>
@@ -397,6 +406,22 @@ onMounted(() => {
             type="textarea"
             :rows="5"
             placeholder="输入你的专业八字命理测算内容：格局、五行喜忌、当月宜忌、经营提醒、沟通建议等"
+          />
+        </el-form-item>
+        <el-form-item label="好事分析">
+          <el-input
+            v-model="dailyProfile.good_events_analysis"
+            type="textarea"
+            :rows="3"
+            placeholder="小程序简洁展示：本月容易发生的好事、机会、适合推进的事"
+          />
+        </el-form-item>
+        <el-form-item label="注意事项">
+          <el-input
+            v-model="dailyProfile.caution_notes"
+            type="textarea"
+            :rows="3"
+            placeholder="小程序简洁展示：本月需要提醒客户注意的事"
           />
         </el-form-item>
         <el-form-item label="老师备注">

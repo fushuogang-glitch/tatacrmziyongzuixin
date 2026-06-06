@@ -20,6 +20,9 @@ class MemberDailyProfile(Base):
     profile_type = Column(String(20), default="customer")  # customer/employee/partner/boss
     monthly_fortune_month = Column(String(7))  # YYYY-MM
     monthly_fortune = Column(Text)
+    current_liuyue = Column(String(30))  # 当前流月，如：丙午月
+    good_events_analysis = Column(Text)  # 小程序展示：好事/机会分析
+    caution_notes = Column(Text)  # 小程序展示：注意事项
     auspicious_keyword = Column(String(50))
     color_personality = Column(String(100))
     mbti = Column(String(20))

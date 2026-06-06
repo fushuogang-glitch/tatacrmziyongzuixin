@@ -24,11 +24,22 @@
       </view>
 
       <view class="section">
-        <text class="sec-title">每 月 运 势 解 读</text>
-        <text class="sec-sub">基于你填写的生辰信息生成，并同步保存到后台</text>
+        <text class="sec-title">流 月 提 醒</text>
+        <text class="sec-sub">后台老师录入后，小程序简洁展示</text>
       </view>
-      <view class="fortune-card">
-        <text>{{ data.monthly_fortune || '填写生辰八字后，将生成本月经营启发。' }}</text>
+      <view class="month-card">
+        <view class="liu-row">
+          <text class="liu-label">当前流月</text>
+          <text class="liu-value">{{ data.monthly_simple?.liu_month || '本月' }}</text>
+        </view>
+        <view class="analysis-block good">
+          <text class="analysis-title">好事分析</text>
+          <text class="analysis-text">{{ data.monthly_simple?.good_events || '本月适合稳住节奏，推进客户沟通、服务复盘和老客激活。' }}</text>
+        </view>
+        <view class="analysis-block caution">
+          <text class="analysis-title">注意事项</text>
+          <text class="analysis-text">{{ data.monthly_simple?.cautions || '注意避免仓促承诺、情绪化决策和拖延跟进。' }}</text>
+        </view>
       </view>
 
       <view class="section">
@@ -142,13 +153,43 @@ onMounted(load);
 .section { padding: 34rpx 32rpx 16rpx; }
 .sec-title { display: block; font-size: 28rpx; letter-spacing: 8rpx; font-weight: 600; }
 .sec-sub { display: block; margin-top: 8rpx; font-size: 22rpx; color: #9a8d78; }
-.fortune-card, .form-card, .profile-card {
+.month-card, .form-card, .profile-card {
   margin: 0 28rpx 24rpx;
   padding: 30rpx;
   border-radius: 24rpx;
   background: #fff;
   font-size: 28rpx;
   line-height: 1.75;
+}
+.liu-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-bottom: 22rpx;
+  border-bottom: 1rpx solid #eee6d9;
+  margin-bottom: 22rpx;
+}
+.liu-label { color: #8a7b66; font-size: 24rpx; }
+.liu-value { color: #b58a3a; font-size: 38rpx; letter-spacing: 8rpx; font-weight: 600; }
+.analysis-block {
+  padding: 22rpx;
+  border-radius: 18rpx;
+  margin-top: 18rpx;
+  background: #fbf8f1;
+}
+.analysis-block.caution { background: #f7f1ed; }
+.analysis-title {
+  display: block;
+  color: #b58a3a;
+  font-size: 24rpx;
+  margin-bottom: 8rpx;
+  font-weight: 600;
+}
+.analysis-text {
+  display: block;
+  font-size: 28rpx;
+  color: #3d352c;
+  line-height: 1.7;
 }
 .field { margin-bottom: 24rpx; }
 .label { display: block; font-size: 24rpx; color: #8a7b66; margin-bottom: 10rpx; }

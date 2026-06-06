@@ -58,6 +58,11 @@ MONTH_THEMES = [
     "用数据复盘替代感觉判断",
 ]
 
+LIUYUE_NAMES = [
+    "甲寅月", "乙卯月", "丙辰月", "丁巳月", "戊午月", "己未月",
+    "庚申月", "辛酉月", "壬戌月", "癸亥月", "甲子月", "乙丑月",
+]
+
 
 class DailyProfileIn(BaseModel):
     birth_date: Optional[date] = None
@@ -67,6 +72,9 @@ class DailyProfileIn(BaseModel):
 
 class AdminDailyProfileIn(DailyProfileIn):
     profile_type: Optional[str] = None
+    current_liuyue: Optional[str] = None
+    good_events_analysis: Optional[str] = None
+    caution_notes: Optional[str] = None
     auspicious_keyword: Optional[str] = None
     color_personality: Optional[str] = None
     mbti: Optional[str] = None
@@ -138,6 +146,19 @@ def _generate_monthly_fortune(member: Member, profile: MemberDailyProfile, month
         f"颜色性格：{color}；MBTI：{mbti}。"
         "以上内容仅作文化娱乐与经营复盘启发，不作为决策或投资依据。"
     )
+
+
+def _monthly_simple(member: Member, profile: MemberDailyProfile) -> dict:
+    seed = f"{member.id}:{profile.birth_date}:{profile.bazi_text}:{_current_month()}"
+    liuyue = profile.current_liuyue or LIUYUE_NAMES[_idx(seed + ":liuyue", len(LIUYUE_NAMES))]
+    word, word_tip = WORDS[_idx(seed + ":simple-word", len(WORDS))]
+    good = profile.good_events_analysis or f"本月利于围绕「{word}」推进客户沟通、服务复盘和老客激活；{word_tip}"
+    caution = profile.caution_notes or "注意避免仓促承诺、情绪化决策和拖延跟进；重要合作建议先确认目标、边界和时间节点。"
+    return {
+        "liu_month": liuyue,
+        "good_events": good,
+        "cautions": caution,
+    }
 
 
 def _daily_record_for(db: Session, member: Member, profile: MemberDailyProfile) -> DailyThoughtRecord:
@@ -389,6 +410,7 @@ def today_thought(current: Member = Depends(get_current_member), db: Session = D
         },
         "profile": _profile_out(profile),
         "monthly_fortune": profile.monthly_fortune,
+        "monthly_simple": _monthly_simple(current, profile),
         "disclaimer": "每日一念仅作文化娱乐与经营启发参考。",
     })
 
