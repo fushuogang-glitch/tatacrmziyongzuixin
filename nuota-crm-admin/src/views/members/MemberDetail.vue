@@ -27,6 +27,7 @@ const dailyProfile = reactive<any>({
   auspicious_keyword: '',
   color_personality: '',
   mbti: '',
+  bazi_analysis: '',
   teacher_notes: '',
   monthly_fortune: '',
 });
@@ -148,6 +149,7 @@ async function saveDailyProfile() {
       auspicious_keyword: dailyProfile.auspicious_keyword || null,
       color_personality: dailyProfile.color_personality || null,
       mbti: dailyProfile.mbti || null,
+      bazi_analysis: dailyProfile.bazi_analysis || null,
       teacher_notes: dailyProfile.teacher_notes || null,
     });
     Object.assign(dailyProfile, p || {});
@@ -338,12 +340,12 @@ onMounted(() => {
     <!-- 储值 -->
     <MemberRechargeBlock :member-id="id" style="margin-bottom: 16px;" />
 
-    <!-- 每日一念画像 -->
+    <!-- 八字命理测算 / 每日一念画像 -->
     <el-card v-if="member" style="margin-bottom: 16px;">
       <template #header>
         <div style="display:flex;justify-content:space-between;align-items:center;">
-          <span style="font-weight:600;">🌿 每日一念画像</span>
-          <el-tag type="info" size="small">小程序展示 / 后台保存</el-tag>
+          <span style="font-weight:600;">☯ 八字命理测算</span>
+          <el-tag type="warning" size="small">老师后台录入 / 月度提醒客户</el-tag>
         </div>
       </template>
       <el-form label-width="110px">
@@ -367,14 +369,22 @@ onMounted(() => {
         <el-form-item label="生辰八字">
           <el-input v-model="dailyProfile.bazi_text" placeholder="如：甲子 乙丑 丙寅 丁卯" />
         </el-form-item>
+        <el-form-item label="命理测算">
+          <el-input
+            v-model="dailyProfile.bazi_analysis"
+            type="textarea"
+            :rows="5"
+            placeholder="输入你的专业八字命理测算内容：格局、五行喜忌、当月宜忌、经营提醒、沟通建议等"
+          />
+        </el-form-item>
         <el-form-item label="老师备注">
           <el-input v-model="dailyProfile.teacher_notes" type="textarea" :rows="3" placeholder="老师对客户性格、沟通方式、服务注意事项的补充" />
         </el-form-item>
-        <el-form-item label="月度解读">
+        <el-form-item label="本月运势">
           <el-input v-model="dailyProfile.monthly_fortune" type="textarea" :rows="4" readonly />
         </el-form-item>
         <div style="text-align:right;">
-          <el-button type="primary" @click="saveDailyProfile" :loading="savingDailyProfile">保存画像并生成月度解读</el-button>
+          <el-button type="primary" @click="saveDailyProfile" :loading="savingDailyProfile">保存测算并生成本月运势</el-button>
         </div>
       </el-form>
     </el-card>

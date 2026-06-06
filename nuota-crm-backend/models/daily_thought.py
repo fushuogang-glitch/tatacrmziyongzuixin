@@ -22,6 +22,7 @@ class MemberDailyProfile(Base):
     auspicious_keyword = Column(String(50))
     color_personality = Column(String(100))
     mbti = Column(String(20))
+    bazi_analysis = Column(Text)  # 老师/命理师输入的专业八字测算内容
     teacher_notes = Column(Text)
     updated_by = Column(Integer, ForeignKey("admin_users.id"))
     created_at = Column(DateTime, server_default=func.now())

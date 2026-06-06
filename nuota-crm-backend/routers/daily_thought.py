@@ -69,6 +69,7 @@ class AdminDailyProfileIn(DailyProfileIn):
     auspicious_keyword: Optional[str] = None
     color_personality: Optional[str] = None
     mbti: Optional[str] = None
+    bazi_analysis: Optional[str] = None
     teacher_notes: Optional[str] = None
 
 
@@ -96,12 +97,14 @@ def _generate_monthly_fortune(member: Member, profile: MemberDailyProfile, month
     word, word_tip = WORDS[_idx(seed + ":word", len(WORDS))]
     color = profile.color_personality or "待老师补充颜色性格"
     mbti = profile.mbti or "待老师补充 MBTI"
+    analysis = profile.bazi_analysis or "后台尚未录入专业八字命理测算"
     birth_hint = profile.bazi_text or (
         f"{profile.birth_date or '未填写生日'} {profile.birth_time or ''}".strip()
     )
     return (
         f"{month_key} 月度启发：本月关键词「{word}」。{theme}。"
         f"结合生辰信息（{birth_hint}），建议把经营动作放在“{word_tip}”上。"
+        f"八字命理测算：{analysis}。"
         f"颜色性格：{color}；MBTI：{mbti}。"
         "以上内容仅作文化娱乐与经营复盘启发，不作为决策或投资依据。"
     )
