@@ -17,6 +17,7 @@ class MemberDailyProfile(Base):
     birth_date = Column(Date)
     birth_time = Column(String(20))
     bazi_text = Column(String(120))
+    profile_type = Column(String(20), default="customer")  # customer/employee/partner/boss
     monthly_fortune_month = Column(String(7))  # YYYY-MM
     monthly_fortune = Column(Text)
     auspicious_keyword = Column(String(50))

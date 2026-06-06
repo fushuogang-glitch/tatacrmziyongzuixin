@@ -8,7 +8,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from database import get_db
-from models import Member, MemberDailyProfile, DailyThoughtRecord, AdminUser
+from models import Member, MemberDailyProfile, DailyThoughtRecord, AdminUser, Consultant
 from utils.auth import get_current_member, get_admin_or_agent
 from utils.helpers import ok, to_dict
 
@@ -66,11 +66,41 @@ class DailyProfileIn(BaseModel):
 
 
 class AdminDailyProfileIn(DailyProfileIn):
+    profile_type: Optional[str] = None
     auspicious_keyword: Optional[str] = None
     color_personality: Optional[str] = None
     mbti: Optional[str] = None
     bazi_analysis: Optional[str] = None
     teacher_notes: Optional[str] = None
+
+
+ZODIACS = ["鼠", "牛", "虎", "兔", "龙", "蛇", "马", "羊", "猴", "鸡", "狗", "猪"]
+ZODIAC_TRIADS = [
+    {"猴", "鼠", "龙"},
+    {"蛇", "鸡", "牛"},
+    {"虎", "马", "狗"},
+    {"猪", "兔", "羊"},
+]
+ZODIAC_CLASHES = {
+    "鼠": "马", "牛": "羊", "虎": "猴", "兔": "鸡", "龙": "狗", "蛇": "猪",
+    "马": "鼠", "羊": "牛", "猴": "虎", "鸡": "兔", "狗": "龙", "猪": "蛇",
+}
+STEM_ELEMENT = {
+    "甲": "木", "乙": "木", "丙": "火", "丁": "火", "戊": "土", "己": "土",
+    "庚": "金", "辛": "金", "壬": "水", "癸": "水",
+}
+BRANCH_ELEMENT = {
+    "子": "水", "丑": "土", "寅": "木", "卯": "木", "辰": "土", "巳": "火",
+    "午": "火", "未": "土", "申": "金", "酉": "金", "戌": "土", "亥": "水",
+}
+GENERATES = {"木": "火", "火": "土", "土": "金", "金": "水", "水": "木"}
+CONTROLS = {"木": "土", "土": "水", "水": "火", "火": "金", "金": "木"}
+PROFILE_TYPE_LABELS = {
+    "customer": "客户",
+    "employee": "员工",
+    "partner": "分公司伙伴",
+    "boss": "公司老板",
+}
 
 
 def _idx(seed: str, modulo: int) -> int:
@@ -145,6 +175,200 @@ def _profile_out(profile: MemberDailyProfile) -> dict:
     return to_dict(profile) if profile else {}
 
 
+def _admin_profile_out(db: Session, member: Member, profile: MemberDailyProfile) -> dict:
+    data = _profile_out(profile)
+    data["matching_report"] = _matching_report(db, member, profile)
+    return data
+
+
+def _zodiac_from_birth(birth_date: Optional[date]) -> Optional[str]:
+    if not birth_date:
+        return None
+    return ZODIACS[(birth_date.year - 4) % 12]
+
+
+def _day_stem(profile: MemberDailyProfile) -> Optional[str]:
+    if not profile.bazi_text:
+        return None
+    parts = [p.strip() for p in profile.bazi_text.replace("，", " ").replace(",", " ").split() if p.strip()]
+    if len(parts) >= 3 and parts[2]:
+        stem = parts[2][0]
+        return stem if stem in STEM_ELEMENT else None
+    for ch in profile.bazi_text:
+        if ch in STEM_ELEMENT:
+            return ch
+    return None
+
+
+def _elements(profile: MemberDailyProfile) -> dict:
+    counts = {k: 0 for k in ["木", "火", "土", "金", "水"]}
+    text = profile.bazi_text or ""
+    for ch in text:
+        if ch in STEM_ELEMENT:
+            counts[STEM_ELEMENT[ch]] += 1
+        if ch in BRANCH_ELEMENT:
+            counts[BRANCH_ELEMENT[ch]] += 1
+    return counts
+
+
+def _zodiac_score(a: Optional[str], b: Optional[str]) -> tuple[int, str]:
+    if not a or not b:
+        return 60, "属相资料不足，按中性匹配"
+    if a == b:
+        return 88, f"同属{a}，节奏相近"
+    if ZODIAC_CLASHES.get(a) == b:
+        return 42, f"{a}{b}相冲，合作需提前约定边界"
+    for triad in ZODIAC_TRIADS:
+        if a in triad and b in triad:
+            return 92, f"{a}{b}三合，协作助力较强"
+    return 72, f"{a}{b}无明显冲克，适合看八字整体"
+
+
+def _stem_score(a: Optional[str], b: Optional[str]) -> tuple[int, str]:
+    if not a or not b:
+        return 60, "日柱天干资料不足，按中性匹配"
+    ea, eb = STEM_ELEMENT[a], STEM_ELEMENT[b]
+    if a == b:
+        return 86, f"日主同为{a}{ea}，认知模式接近"
+    if GENERATES.get(ea) == eb:
+        return 90, f"{ea}生{eb}，一方能助推另一方"
+    if GENERATES.get(eb) == ea:
+        return 88, f"{eb}生{ea}，关系中有滋养之象"
+    if CONTROLS.get(ea) == eb or CONTROLS.get(eb) == ea:
+        return 52, f"{ea}{eb}有制化关系，适合明确权责"
+    return 74, f"{ea}{eb}平稳，宜以事定人"
+
+
+def _overall_score(a: MemberDailyProfile, b: MemberDailyProfile, zodiac_score: int, stem_score: int) -> tuple[int, str]:
+    ae, be = _elements(a), _elements(b)
+    total_a = sum(ae.values())
+    total_b = sum(be.values())
+    if not total_a or not total_b:
+        return round(zodiac_score * 0.45 + stem_score * 0.55), "八字完整度不足，主要参考属相与日柱"
+    shared = sum(min(ae[k], be[k]) for k in ae)
+    balance = int(shared / max(total_a, total_b) * 100)
+    score = round(zodiac_score * 0.25 + stem_score * 0.35 + balance * 0.40)
+    strong = sorted(ae, key=ae.get, reverse=True)[0]
+    other = sorted(be, key=be.get, reverse=True)[0]
+    return score, f"五行重合度约{balance}%，一方偏{strong}，一方偏{other}"
+
+
+def _match_one(member: Member, profile: MemberDailyProfile, other: Member, other_profile: MemberDailyProfile, relation: str) -> dict:
+    za, zb = _zodiac_from_birth(profile.birth_date), _zodiac_from_birth(other_profile.birth_date)
+    zodiac_score, zodiac_note = _zodiac_score(za, zb)
+    sa, sb = _day_stem(profile), _day_stem(other_profile)
+    stem_score, stem_note = _stem_score(sa, sb)
+    overall_score, overall_note = _overall_score(profile, other_profile, zodiac_score, stem_score)
+    return {
+        "member_id": other.id,
+        "name": other.name,
+        "enterprise_name": other.enterprise_name,
+        "role": other.role,
+        "profile_type": other_profile.profile_type or "customer",
+        "profile_type_label": PROFILE_TYPE_LABELS.get(other_profile.profile_type or "customer", other_profile.profile_type or "客户"),
+        "relation": relation,
+        "zodiac": {"self": za, "target": zb, "score": zodiac_score, "note": zodiac_note},
+        "day_stem": {"self": sa, "target": sb, "score": stem_score, "note": stem_note},
+        "overall": {"score": overall_score, "note": overall_note},
+        "suggestion": _match_suggestion(overall_score, relation),
+    }
+
+
+def _match_suggestion(score: int, relation: str) -> str:
+    if score >= 85:
+        return f"{relation}匹配度高，适合重点协作与深度沟通。"
+    if score >= 70:
+        return f"{relation}匹配度平稳，建议按流程推进并加强复盘。"
+    if score >= 55:
+        return f"{relation}存在差异，适合提前明确目标、边界和节奏。"
+    return f"{relation}冲突点较多，建议谨慎配对，由老师介入协调。"
+
+
+def _candidate_profiles(db: Session, member: Member, profile: MemberDailyProfile) -> list[tuple[Member, MemberDailyProfile, str]]:
+    q = (
+        db.query(Member, MemberDailyProfile)
+        .join(MemberDailyProfile, MemberDailyProfile.member_id == Member.id)
+        .filter(Member.id != member.id, Member.status == "active")
+    )
+    rows = q.all()
+    candidates = []
+    for other, other_profile in rows:
+        relation = None
+        if profile.profile_type == "employee" and (other_profile.profile_type or "customer") in ("customer", "boss"):
+            relation = "员工与客户"
+        elif profile.profile_type in ("customer", "boss") and other_profile.profile_type == "employee":
+            relation = "客户与员工"
+        elif member.consultant_id and other.consultant_id == member.consultant_id:
+            relation = "同组伙伴"
+        if member.enterprise_id and other.enterprise_id == member.enterprise_id:
+            relation = "企业内部"
+        if relation:
+            candidates.append((other, other_profile, relation))
+    return candidates[:50]
+
+
+def _boss_match(db: Session, member: Member, profile: MemberDailyProfile) -> Optional[dict]:
+    boss = None
+    if member.enterprise_id:
+        from models.enterprise import Enterprise
+        ent = db.query(Enterprise).filter(Enterprise.id == member.enterprise_id).first()
+        if ent and ent.boss_member_id and ent.boss_member_id != member.id:
+            boss = db.query(Member).filter(Member.id == ent.boss_member_id).first()
+    if not boss and member.enterprise_name:
+        boss = (
+            db.query(Member)
+            .filter(Member.id != member.id, Member.enterprise_name == member.enterprise_name, Member.role == "boss")
+            .first()
+        )
+    if not boss:
+        return None
+    boss_profile = db.query(MemberDailyProfile).filter(MemberDailyProfile.member_id == boss.id).first()
+    if not boss_profile:
+        return None
+    return _match_one(member, profile, boss, boss_profile, "与公司老板")
+
+
+def _branch_partner_matches(db: Session, member: Member, profile: MemberDailyProfile) -> list[dict]:
+    if not member.consultant_id:
+        return []
+    consultant = db.query(Consultant).filter(Consultant.id == member.consultant_id).first()
+    if not consultant or not consultant.branch_id:
+        return []
+    branch_consultants = db.query(Consultant.id).filter(Consultant.branch_id == consultant.branch_id).all()
+    consultant_ids = [c.id for c in branch_consultants]
+    if not consultant_ids:
+        return []
+    rows = (
+        db.query(Member, MemberDailyProfile)
+        .join(MemberDailyProfile, MemberDailyProfile.member_id == Member.id)
+        .filter(Member.id != member.id, Member.status == "active", Member.consultant_id.in_(consultant_ids))
+        .limit(30)
+        .all()
+    )
+    return [_match_one(member, profile, other, other_profile, "分公司伙伴") for other, other_profile in rows]
+
+
+def _matching_report(db: Session, member: Member, profile: MemberDailyProfile) -> dict:
+    direct = [_match_one(member, profile, other, other_profile, relation)
+              for other, other_profile, relation in _candidate_profiles(db, member, profile)]
+    branch = _branch_partner_matches(db, member, profile)
+    boss = _boss_match(db, member, profile)
+    direct.sort(key=lambda x: x["overall"]["score"], reverse=True)
+    branch.sort(key=lambda x: x["overall"]["score"], reverse=True)
+    return {
+        "self": {
+            "profile_type": profile.profile_type or "customer",
+            "profile_type_label": PROFILE_TYPE_LABELS.get(profile.profile_type or "customer", "客户"),
+            "zodiac": _zodiac_from_birth(profile.birth_date),
+            "day_stem": _day_stem(profile),
+            "elements": _elements(profile),
+        },
+        "customer_employee_matches": direct[:12],
+        "branch_partner_matches": branch[:12],
+        "boss_match": boss,
+    }
+
+
 @api_router.get("/today")
 def today_thought(current: Member = Depends(get_current_member), db: Session = Depends(get_db)):
     profile = _profile_for(db, current.id)
@@ -191,7 +415,7 @@ def admin_get_profile(member_id: int, db: Session = Depends(get_db), _: AdminUse
         profile.monthly_fortune_month = _current_month()
         profile.monthly_fortune = _generate_monthly_fortune(member, profile, profile.monthly_fortune_month)
         db.commit()
-    return ok(_profile_out(profile))
+    return ok(_admin_profile_out(db, member, profile))
 
 
 @admin_router.put("/members/{member_id}/profile")
@@ -212,4 +436,4 @@ def admin_save_profile(
     profile.monthly_fortune = _generate_monthly_fortune(member, profile, profile.monthly_fortune_month)
     db.commit()
     db.refresh(profile)
-    return ok(_profile_out(profile), "每日一念资料已保存")
+    return ok(_admin_profile_out(db, member, profile), "每日一念资料已保存")

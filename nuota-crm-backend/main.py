@@ -87,6 +87,43 @@ def _ensure_schema():
             created_at TIMESTAMP DEFAULT NOW()
         )
         """,
+        """
+        CREATE TABLE IF NOT EXISTS member_daily_profiles (
+            id SERIAL PRIMARY KEY,
+            member_id INTEGER UNIQUE NOT NULL,
+            birth_date DATE,
+            birth_time VARCHAR(20),
+            bazi_text VARCHAR(120),
+            profile_type VARCHAR(20) DEFAULT 'customer',
+            monthly_fortune_month VARCHAR(7),
+            monthly_fortune TEXT,
+            auspicious_keyword VARCHAR(50),
+            color_personality VARCHAR(100),
+            mbti VARCHAR(20),
+            bazi_analysis TEXT,
+            teacher_notes TEXT,
+            updated_by INTEGER,
+            created_at TIMESTAMP DEFAULT NOW(),
+            updated_at TIMESTAMP DEFAULT NOW()
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS daily_thought_records (
+            id SERIAL PRIMARY KEY,
+            member_id INTEGER NOT NULL,
+            record_date DATE NOT NULL,
+            word VARCHAR(30) NOT NULL,
+            hexagram VARCHAR(60),
+            meaning TEXT,
+            almanac_good VARCHAR(200),
+            almanac_avoid VARCHAR(200),
+            created_at TIMESTAMP DEFAULT NOW()
+        )
+        """,
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_daily_thought_member_date ON daily_thought_records(member_id, record_date)",
+        "CREATE INDEX IF NOT EXISTS ix_member_daily_profiles_member_id ON member_daily_profiles(member_id)",
+        "ALTER TABLE member_daily_profiles ADD COLUMN IF NOT EXISTS profile_type VARCHAR(20) DEFAULT 'customer'",
+        "ALTER TABLE member_daily_profiles ADD COLUMN IF NOT EXISTS bazi_analysis TEXT",
     ]
     with engine.begin() as conn:
         for s in stmts:

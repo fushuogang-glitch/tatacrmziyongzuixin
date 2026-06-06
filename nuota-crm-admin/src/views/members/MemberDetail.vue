@@ -21,6 +21,7 @@ const savingHistory = ref(false);
 const savingDailyProfile = ref(false);
 const historyForm = reactive({ course: 0, service: 0, referral: 0 });
 const dailyProfile = reactive<any>({
+  profile_type: 'customer',
   birth_date: '',
   birth_time: '',
   bazi_text: '',
@@ -30,7 +31,15 @@ const dailyProfile = reactive<any>({
   bazi_analysis: '',
   teacher_notes: '',
   monthly_fortune: '',
+  matching_report: {},
 });
+
+const PROFILE_TYPE_OPTS = [
+  { value: 'customer', label: '客户' },
+  { value: 'employee', label: '员工' },
+  { value: 'partner', label: '分公司伙伴' },
+  { value: 'boss', label: '公司老板' },
+];
 
 const STATUS_OPTS = [
   { value: 'intention', label: '意向客户', type: 'info' },
@@ -146,6 +155,7 @@ async function saveDailyProfile() {
       birth_date: dailyProfile.birth_date || null,
       birth_time: dailyProfile.birth_time || null,
       bazi_text: dailyProfile.bazi_text || null,
+      profile_type: dailyProfile.profile_type || 'customer',
       auspicious_keyword: dailyProfile.auspicious_keyword || null,
       color_personality: dailyProfile.color_personality || null,
       mbti: dailyProfile.mbti || null,
@@ -159,6 +169,13 @@ async function saveDailyProfile() {
   } finally {
     savingDailyProfile.value = false;
   }
+}
+
+function scoreType(score: number) {
+  if (score >= 85) return 'success';
+  if (score >= 70) return 'warning';
+  if (score >= 55) return 'info';
+  return 'danger';
 }
 
 async function deleteMember() {
@@ -350,6 +367,11 @@ onMounted(() => {
       </template>
       <el-form label-width="110px">
         <div class="daily-profile-grid">
+          <el-form-item label="录入类型">
+            <el-select v-model="dailyProfile.profile_type" style="width:100%;">
+              <el-option v-for="o in PROFILE_TYPE_OPTS" :key="o.value" :label="o.label" :value="o.value" />
+            </el-select>
+          </el-form-item>
           <el-form-item label="出生日期">
             <el-date-picker v-model="dailyProfile.birth_date" type="date" value-format="YYYY-MM-DD" placeholder="用户填写或老师补录" style="width:100%;" />
           </el-form-item>
@@ -387,6 +409,61 @@ onMounted(() => {
           <el-button type="primary" @click="saveDailyProfile" :loading="savingDailyProfile">保存测算并生成本月运势</el-button>
         </div>
       </el-form>
+
+      <div class="match-panel" v-if="dailyProfile.matching_report">
+        <div class="match-title">自动匹配报告</div>
+        <div class="self-meta">
+          <el-tag type="info">类型：{{ dailyProfile.matching_report.self?.profile_type_label || '客户' }}</el-tag>
+          <el-tag>属相：{{ dailyProfile.matching_report.self?.zodiac || '未录入' }}</el-tag>
+          <el-tag>日柱天干：{{ dailyProfile.matching_report.self?.day_stem || '未识别' }}</el-tag>
+        </div>
+
+        <div v-if="dailyProfile.matching_report.boss_match" class="match-block boss">
+          <div class="match-block-title">与公司老板匹配</div>
+          <div class="match-row">
+            <div>
+              <b>{{ dailyProfile.matching_report.boss_match.name }}</b>
+              <div class="match-note">{{ dailyProfile.matching_report.boss_match.suggestion }}</div>
+            </div>
+            <el-tag :type="scoreType(dailyProfile.matching_report.boss_match.overall?.score)">
+              {{ dailyProfile.matching_report.boss_match.overall?.score }}分
+            </el-tag>
+          </div>
+          <div class="match-detail">
+            属相：{{ dailyProfile.matching_report.boss_match.zodiac?.note }}；
+            日干：{{ dailyProfile.matching_report.boss_match.day_stem?.note }}；
+            整体：{{ dailyProfile.matching_report.boss_match.overall?.note }}
+          </div>
+        </div>
+
+        <div class="match-columns">
+          <div class="match-block">
+            <div class="match-block-title">员工 / 客户匹配</div>
+            <el-empty v-if="!dailyProfile.matching_report.customer_employee_matches?.length" description="暂无可匹配对象" :image-size="56" />
+            <div v-for="m in (dailyProfile.matching_report.customer_employee_matches || [])" :key="`ce-${m.member_id}`" class="match-row">
+              <div>
+                <b>{{ m.name }}</b>
+                <span class="match-relation"> · {{ m.relation }} · {{ m.profile_type_label }}</span>
+                <div class="match-note">{{ m.zodiac.note }} / {{ m.day_stem.note }}</div>
+              </div>
+              <el-tag :type="scoreType(m.overall.score)">{{ m.overall.score }}分</el-tag>
+            </div>
+          </div>
+
+          <div class="match-block">
+            <div class="match-block-title">分公司伙伴匹配</div>
+            <el-empty v-if="!dailyProfile.matching_report.branch_partner_matches?.length" description="暂无同分公司资料" :image-size="56" />
+            <div v-for="m in (dailyProfile.matching_report.branch_partner_matches || [])" :key="`bp-${m.member_id}`" class="match-row">
+              <div>
+                <b>{{ m.name }}</b>
+                <span class="match-relation"> · {{ m.enterprise_name || '未填写企业' }}</span>
+                <div class="match-note">{{ m.overall.note }}</div>
+              </div>
+              <el-tag :type="scoreType(m.overall.score)">{{ m.overall.score }}分</el-tag>
+            </div>
+          </div>
+        </div>
+      </div>
     </el-card>
 
     <!-- 🔮 会员深度分析 -->
@@ -482,8 +559,65 @@ onMounted(() => {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0 12px;
 }
+.match-panel {
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid #ebeef5;
+}
+.match-title {
+  font-weight: 600;
+  margin-bottom: 10px;
+}
+.self-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.match-columns {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+.match-block {
+  background: #f8f9fb;
+  border-radius: 8px;
+  padding: 12px;
+}
+.match-block.boss {
+  margin-bottom: 12px;
+  background: #fff7e8;
+}
+.match-block-title {
+  font-weight: 600;
+  margin-bottom: 8px;
+  color: #303133;
+}
+.match-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid #ebeef5;
+}
+.match-row:last-child {
+  border-bottom: 0;
+}
+.match-relation {
+  color: #909399;
+  font-size: 12px;
+}
+.match-note, .match-detail {
+  margin-top: 4px;
+  color: #606266;
+  font-size: 12px;
+  line-height: 1.55;
+}
 @media (max-width: 768px) {
   .daily-profile-grid {
+    grid-template-columns: 1fr;
+  }
+  .match-columns {
     grid-template-columns: 1fr;
   }
 }
