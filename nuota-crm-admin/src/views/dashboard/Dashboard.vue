@@ -1,19 +1,32 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue';
+import { useRouter } from 'vue-router';
 import { TOKEN_KEY, API } from '../../api';
 
 const d = reactive<any>({
   member: {}, consultant: {}, finance: {}, analysis: {},
   year: 0, month: 0,
 });
+const cockpit = reactive<any>({
+  date: '',
+  kpi: { today: {}, month: {} },
+  todos: [],
+  followup_reminders: [],
+  summary: {},
+});
 const loading = ref(false);
 const selectedYear = ref(new Date().getFullYear());
 const selectedMonth = ref(new Date().getMonth() + 1);
+const router = useRouter();
 
 async function load() {
   loading.value = true;
   try {
-    const res: any = await API.dashboardV2(selectedYear.value, selectedMonth.value);
+    const [cockpitRes, res]: any[] = await Promise.all([
+      API.dashboardCockpit(),
+      API.dashboardV2(selectedYear.value, selectedMonth.value),
+    ]);
+    Object.assign(cockpit, cockpitRes || {});
     Object.assign(d, res);
   } finally {
     loading.value = false;
@@ -28,6 +41,32 @@ function yuan(v: number) {
 
 const months = [1,2,3,4,5,6,7,8,9,10,11,12];
 
+function dateText(v: string) {
+  if (!v) return '';
+  return String(v).replace('T', ' ').slice(0, 16);
+}
+
+function categoryLabel(v: string) {
+  const map: Record<string, string> = {
+    booking: '预约',
+    service_order: '工单',
+    payment_due: '补款',
+    consultant_approval: '审核',
+  };
+  return map[v] || v || '待办';
+}
+
+function sourceTagType(source: string) {
+  if (source === 'member_followup') return 'warning';
+  if (source === 'course_enrollment') return 'success';
+  return 'info';
+}
+
+function go(url: string) {
+  if (!url) return;
+  router.push(url);
+}
+
 onMounted(() => { if (localStorage.getItem(TOKEN_KEY)) load(); });
 </script>
 
@@ -35,7 +74,7 @@ onMounted(() => { if (localStorage.getItem(TOKEN_KEY)) load(); });
   <div v-loading="loading" class="dash">
     <!-- 顶部筛选 -->
     <div class="filter-bar">
-      <h2 class="page-title">📊 数 据 看 板</h2>
+      <h2 class="page-title">经营驾驶舱</h2>
       <div class="filter-right">
         <el-select v-model="selectedYear" size="small" style="width: 100px" @change="load">
           <el-option v-for="y in [2025,2026,2027]" :key="y" :label="y+'年'" :value="y" />
@@ -47,8 +86,98 @@ onMounted(() => { if (localStorage.getItem(TOKEN_KEY)) load(); });
       </div>
     </div>
 
+    <!-- ═══ 2.1 经营驾驶舱 ═══ -->
+    <div class="cockpit-hero">
+      <div>
+        <div class="hero-title">今日经营中台</div>
+        <div class="hero-sub">实时聚合收款、工单、预约、课程与客户跟进，日期：{{ cockpit.date || '-' }}</div>
+      </div>
+      <div class="hero-summary">
+        <span>待办 {{ cockpit.summary?.todo_total || 0 }}</span>
+        <span>跟进 {{ cockpit.summary?.followup_total || 0 }}</span>
+        <span class="danger">逾期 {{ cockpit.summary?.followup_overdue || 0 }}</span>
+      </div>
+    </div>
+
+    <div class="cockpit-grid">
+      <div class="card green">
+        <div class="card-num sm">{{ yuan(cockpit.kpi?.today?.payment_amount || 0) }}</div>
+        <div class="card-label">今日收款</div>
+      </div>
+      <div class="card">
+        <div class="card-num">{{ cockpit.kpi?.today?.payment_count || 0 }}</div>
+        <div class="card-unit">笔</div>
+        <div class="card-label">今日收款笔数</div>
+      </div>
+      <div class="card purple">
+        <div class="card-num">{{ cockpit.kpi?.today?.new_members || 0 }}</div>
+        <div class="card-unit">位</div>
+        <div class="card-label">今日新增客户</div>
+      </div>
+      <div class="card gold">
+        <div class="card-num">{{ cockpit.kpi?.today?.service_orders_today || 0 }}</div>
+        <div class="card-unit">单</div>
+        <div class="card-label">今日服务工单</div>
+      </div>
+      <div class="card">
+        <div class="card-num">{{ cockpit.kpi?.today?.bookings_today || 0 }}</div>
+        <div class="card-unit">个</div>
+        <div class="card-label">今日下店预约</div>
+      </div>
+      <div class="card orange">
+        <div class="card-num sm">{{ yuan(cockpit.kpi?.month?.debt_amount || 0) }}</div>
+        <div class="card-label">待补款总额</div>
+      </div>
+    </div>
+
+    <div class="work-grid">
+      <el-card shadow="never" class="work-card">
+        <template #header>
+          <div class="panel-head">
+            <span>今日待办</span>
+            <el-tag size="small" type="danger" effect="plain">{{ cockpit.summary?.todo_total || 0 }}</el-tag>
+          </div>
+        </template>
+        <el-empty v-if="!cockpit.todos?.length" description="暂无待办" :image-size="70" />
+        <div v-for="item in cockpit.todos" :key="item.id" class="todo-row" @click="go(item.action_url)">
+          <el-tag size="small" :type="item.priority === 'high' ? 'danger' : 'info'" effect="light">
+            {{ categoryLabel(item.category) }}
+          </el-tag>
+          <div class="todo-main">
+            <div class="todo-title">{{ item.title }}</div>
+            <div class="todo-sub">{{ item.subtitle || '待处理' }}</div>
+          </div>
+          <div class="todo-time">{{ dateText(item.due_at) }}</div>
+        </div>
+      </el-card>
+
+      <el-card shadow="never" class="work-card">
+        <template #header>
+          <div class="panel-head">
+            <span>客户跟进提醒</span>
+            <div>
+              <el-tag size="small" type="danger" effect="plain">逾期 {{ cockpit.summary?.followup_overdue || 0 }}</el-tag>
+              <el-tag size="small" type="warning" effect="plain" style="margin-left:6px;">今日 {{ cockpit.summary?.followup_due_today || 0 }}</el-tag>
+            </div>
+          </div>
+        </template>
+        <el-empty v-if="!cockpit.followup_reminders?.length" description="暂无跟进提醒" :image-size="70" />
+        <div v-for="f in cockpit.followup_reminders" :key="`${f.source}-${f.ref?.id}`" class="follow-row" @click="go(f.action_url)">
+          <div class="follow-top">
+            <strong>{{ f.member_name || '未知客户' }}</strong>
+            <el-tag size="small" :type="sourceTagType(f.source)" effect="plain">{{ f.source_label }}</el-tag>
+            <el-tag v-if="f.overdue_days > 0" size="small" type="danger">逾期 {{ f.overdue_days }} 天</el-tag>
+          </div>
+          <div class="follow-sub">
+            {{ f.enterprise_name || '未填写企业' }} · {{ f.consultant_name || '未分配老师' }} · {{ f.status_label || '待跟进' }}
+          </div>
+          <div class="follow-time">下次跟进：{{ dateText(f.next_follow_at) || '-' }}</div>
+        </div>
+      </el-card>
+    </div>
+
     <!-- ═══ 一、会员/学员 ═══ -->
-    <div class="section-title">🏪 会员 / 学员</div>
+    <div class="section-title">月度数据看板 · 会员 / 学员</div>
     <div class="stat-grid g5">
       <div class="card gold">
         <div class="card-num">{{ d.member?.month_service_stores || 0 }}</div>
@@ -270,9 +399,69 @@ onMounted(() => { if (localStorage.getItem(TOKEN_KEY)) load(); });
 <style scoped>
 .dash { padding: 0 4px; }
 .filter-bar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
-.page-title { font-size: 17px; font-weight: 500; letter-spacing: 3px; margin: 0; }
+.page-title { font-size: 18px; font-weight: 600; letter-spacing: 2px; margin: 0; }
 .filter-right { display: flex; gap: 6px; align-items: center; }
 .section-title { font-size: 13px; font-weight: 500; color: #606266; margin: 14px 0 8px; padding-left: 2px; letter-spacing: 2px; }
+
+.cockpit-hero {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 18px 20px;
+  margin-bottom: 12px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, #17233d 0%, #2f466c 100%);
+  color: #fff;
+  box-shadow: 0 8px 24px rgba(23, 35, 61, 0.14);
+}
+.hero-title { font-size: 20px; font-weight: 700; letter-spacing: 1px; }
+.hero-sub { margin-top: 6px; font-size: 12px; color: rgba(255,255,255,0.72); }
+.hero-summary { display: flex; gap: 8px; align-items: center; }
+.hero-summary span {
+  display: inline-flex;
+  align-items: center;
+  height: 28px;
+  padding: 0 12px;
+  border-radius: 16px;
+  background: rgba(255,255,255,0.13);
+  font-size: 12px;
+}
+.hero-summary .danger { background: rgba(245,108,108,0.24); color: #ffd7d7; }
+.cockpit-grid {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.work-grid {
+  display: grid;
+  grid-template-columns: 1fr 1.2fr;
+  gap: 12px;
+  margin-bottom: 18px;
+}
+.work-card :deep(.el-card__header) { padding: 10px 14px; }
+.work-card :deep(.el-card__body) { padding: 4px 14px 10px; max-height: 380px; overflow-y: auto; }
+.panel-head { display: flex; align-items: center; justify-content: space-between; font-size: 14px; font-weight: 600; }
+.todo-row, .follow-row {
+  cursor: pointer;
+  border-bottom: 1px solid #f1f3f7;
+  transition: background 0.15s;
+}
+.todo-row:hover, .follow-row:hover { background: #f8fbff; }
+.todo-row {
+  display: grid;
+  grid-template-columns: 58px 1fr 110px;
+  gap: 8px;
+  align-items: center;
+  padding: 10px 0;
+}
+.todo-title { font-size: 13px; font-weight: 600; color: #303133; }
+.todo-sub { margin-top: 3px; font-size: 12px; color: #909399; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.todo-time { text-align: right; font-size: 11px; color: #909399; }
+.follow-row { padding: 10px 0; }
+.follow-top { display: flex; align-items: center; gap: 6px; font-size: 13px; color: #303133; }
+.follow-sub { margin-top: 5px; font-size: 12px; color: #606266; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.follow-time { margin-top: 4px; font-size: 11px; color: #909399; }
 
 /* 统一grid布局 - 5列 */
 .stat-grid { display: grid; gap: 10px; }
@@ -319,4 +508,9 @@ onMounted(() => { if (localStorage.getItem(TOKEN_KEY)) load(); });
 .rank-empty { text-align: center; color: #C0C4CC; padding: 6px 0; font-size: 11px; }
 .empty-hint { text-align: center; color: #C0C4CC; font-size: 12px; padding: 10px 0; }
 .rank-sub { font-size: 10px; color: #909399; font-weight: 400; margin-left: 3px; }
+
+@media (max-width: 1280px) {
+  .cockpit-grid { grid-template-columns: repeat(3, 1fr); }
+  .work-grid { grid-template-columns: 1fr; }
+}
 </style>

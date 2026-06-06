@@ -4,7 +4,7 @@ import { TOKEN_KEY } from '../utils/http';
 const routes: RouteRecordRaw[] = [
   { path: '/login', component: () => import('../views/login/Login.vue'), meta: { title: '登录' } },
   { path: '/', redirect: '/dashboard' },
-  { path: '/dashboard', component: () => import('../views/dashboard/Dashboard.vue'), meta: { title: '数据看板' } },
+  { path: '/dashboard', component: () => import('../views/dashboard/Dashboard.vue'), meta: { title: '经营驾驶舱' } },
   { path: '/my-dashboard', component: () => import('../views/dashboard/ConsultantDashboard.vue'), meta: { title: '我的看板' } },
   { path: '/customers', component: () => import('../views/customers/CustomerBoard.vue'), meta: { title: '客户管理' } },
   { path: '/members', component: () => import('../views/members/MemberList.vue'), meta: { title: '学员管理' } },

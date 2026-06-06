@@ -11,6 +11,8 @@ export const API = {
   dashboard: () => http.get('/admin/dashboard'),
   dashboardV2: (year?: number, month?: number) =>
     http.get('/admin/dashboard/v2', { params: { ...(year ? { year } : {}), ...(month ? { month } : {}) } }),
+  dashboardCockpit: (targetDate?: string) =>
+    http.get('/admin/dashboard/cockpit', { params: targetDate ? { target_date: targetDate } : {} }),
 
   // 学员
   memberList: (params: any) => http.get('/admin/members', { params }),

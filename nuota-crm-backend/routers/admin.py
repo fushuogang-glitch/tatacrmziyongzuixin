@@ -1,5 +1,5 @@
 # 管理后台：学员 / 顾问 / 缴费 / 看板
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -1366,6 +1366,342 @@ def dashboard_v2(
             "consultant_assigned_rank": [{"name": r[0], "count": r[1]} for r in consultant_assigned_rank],
             "consultant_followed_rank": [{"name": r[0] or "", "count": r[1]} for r in consultant_followed_rank_raw],
             "consultant_conversion": consultant_conversion,
+        },
+    })
+
+
+# ──────────────────── 经营驾驶舱（今日待办 + 跟进提醒） ────────────────────
+
+def _iso_dt(value):
+    return value.isoformat() if value else None
+
+
+def _iso_date(value):
+    return value.isoformat() if value else None
+
+
+def _safe_float(value) -> float:
+    return float(value or 0)
+
+
+def _todo(category: str, title: str, subtitle: str, ref_type: str, ref_id: int,
+          action_url: str, priority: str = "normal", due_at=None, assignee=None, meta=None):
+    return {
+        "id": f"{category}:{ref_id}",
+        "category": category,
+        "priority": priority,
+        "title": title,
+        "subtitle": subtitle,
+        "due_at": _iso_dt(due_at) if isinstance(due_at, datetime) else _iso_date(due_at),
+        "assignee": assignee,
+        "ref": {"type": ref_type, "id": ref_id},
+        "action_url": action_url,
+        "meta": meta or {},
+    }
+
+
+@router.get("/dashboard/cockpit")
+def dashboard_cockpit(
+    target_date: Optional[str] = Query(None, description="YYYY-MM-DD，默认今天"),
+    db: Session = Depends(get_db),
+    _: AdminUser = Depends(get_admin_or_agent),
+):
+    """经营驾驶舱：今日 KPI、待办任务、客户跟进提醒。"""
+    try:
+        day = date.fromisoformat(target_date) if target_date else date.today()
+    except Exception:
+        raise HTTPException(status_code=400, detail="target_date 格式应为 YYYY-MM-DD")
+
+    day_start = datetime.combine(day, datetime.min.time())
+    day_end = day_start + timedelta(days=1)
+    month_start = day.replace(day=1)
+    next_month = (month_start.replace(day=28) + timedelta(days=4)).replace(day=1)
+    paid_statuses = ["paid", "partial"]
+    payment_time = func.coalesce(Payment.pay_time, Payment.created_at)
+
+    today_payment_amount = _safe_float(
+        db.query(func.coalesce(func.sum(Payment.amount), 0))
+        .filter(Payment.pay_status.in_(paid_statuses), payment_time >= day_start, payment_time < day_end)
+        .scalar()
+    )
+    today_payment_count = int(
+        db.query(func.count(Payment.id))
+        .filter(Payment.pay_status.in_(paid_statuses), payment_time >= day_start, payment_time < day_end)
+        .scalar() or 0
+    )
+    today_new_members = int(
+        db.query(func.count(Member.id))
+        .filter(Member.created_at >= day_start, Member.created_at < day_end)
+        .scalar() or 0
+    )
+    today_service_orders = int(
+        db.query(func.count(ServiceOrder.id))
+        .filter(ServiceOrder.appoint_date == day, ServiceOrder.status != "cancelled")
+        .scalar() or 0
+    )
+    today_bookings = int(
+        db.query(func.count(VisitBooking.id))
+        .filter(VisitBooking.confirmed_date == day, VisitBooking.status.in_(["confirmed", "in_progress"]))
+        .scalar() or 0
+    )
+    today_course_sessions = 0
+    try:
+        from models.course_session import CourseSession as CourseSessionV2
+        today_course_sessions = int(
+            db.query(func.count(CourseSessionV2.id))
+            .filter(CourseSessionV2.start_date <= day, CourseSessionV2.end_date >= day,
+                    CourseSessionV2.status.in_(["enrolling", "ongoing"]))
+            .scalar() or 0
+        )
+    except Exception:
+        today_course_sessions = 0
+
+    month_payment_amount = _safe_float(
+        db.query(func.coalesce(func.sum(Payment.amount), 0))
+        .filter(Payment.pay_status.in_(paid_statuses),
+                payment_time >= datetime.combine(month_start, datetime.min.time()),
+                payment_time < datetime.combine(next_month, datetime.min.time()))
+        .scalar()
+    )
+    month_debt_amount = _safe_float(
+        db.query(func.coalesce(func.sum(Payment.debt_amount), 0))
+        .filter(Payment.debt_amount > 0, Payment.pay_status.in_(["pending", "partial"]))
+        .scalar()
+    )
+    month_service_stores = int(
+        db.query(func.count(func.distinct(ServiceOrder.member_id)))
+        .filter(ServiceOrder.status.notin_(["cancelled", "pending"]),
+                ServiceOrder.appoint_date >= month_start,
+                ServiceOrder.appoint_date < next_month)
+        .scalar() or 0
+    )
+
+    todos = []
+    # 新预约待确认
+    pending_bookings = (
+        db.query(VisitBooking)
+        .filter(VisitBooking.status == "pending")
+        .order_by(VisitBooking.apply_time.asc())
+        .limit(8)
+        .all()
+    )
+    for b in pending_bookings:
+        member = db.query(Member).filter(Member.id == b.member_id).first() if b.member_id else None
+        todos.append(_todo(
+            "booking",
+            f"预约待确认 · {member.name if member else '未知客户'}",
+            f"{b.city or ''} {b.preferred_date or ''}".strip() or "客户提交了下店预约",
+            "visit_booking",
+            b.id,
+            "/bookings",
+            "high",
+            b.preferred_date,
+            meta={"member_id": b.member_id},
+        ))
+
+    # 服务工单待处理
+    pending_orders = (
+        db.query(ServiceOrder)
+        .filter(ServiceOrder.status.in_(["pending", "confirmed"]))
+        .order_by(ServiceOrder.created_at.asc())
+        .limit(8)
+        .all()
+    )
+    for o in pending_orders:
+        member = db.query(Member).filter(Member.id == o.member_id).first() if o.member_id else None
+        consultant = db.query(Consultant).filter(Consultant.id == o.consultant_id).first() if o.consultant_id else None
+        todos.append(_todo(
+            "service_order",
+            f"工单待处理 · {o.order_no or ('#' + str(o.id))}",
+            f"{member.name if member else '未关联客户'} · {o.workflow_stage or o.status}",
+            "service_order",
+            o.id,
+            f"/service-orders/{o.id}",
+            "high" if o.status == "pending" else "normal",
+            o.appoint_date,
+            {"id": consultant.id, "name": consultant.name, "type": "consultant"} if consultant else None,
+            {"member_id": o.member_id},
+        ))
+
+    # 欠款/补款到期
+    due_payments = (
+        db.query(Payment)
+        .filter(Payment.debt_amount > 0,
+                Payment.pay_status.in_(["pending", "partial"]),
+                Payment.due_date.isnot(None),
+                Payment.due_date <= day + timedelta(days=1))
+        .order_by(Payment.due_date.asc())
+        .limit(8)
+        .all()
+    )
+    for p in due_payments:
+        member = db.query(Member).filter(Member.id == p.member_id).first() if p.member_id else None
+        priority = "high" if p.due_date and p.due_date <= day else "normal"
+        todos.append(_todo(
+            "payment_due",
+            f"补款提醒 · {member.name if member else '未知客户'}",
+            f"待补 {p.debt_amount or 0} 元，截止 {p.due_date or '未设置'}",
+            "payment",
+            p.id,
+            f"/members/{p.member_id}" if p.member_id else "/payments",
+            priority,
+            p.due_date,
+            meta={"member_id": p.member_id, "debt_amount": _safe_float(p.debt_amount)},
+        ))
+
+    # 老师申请待审核
+    pending_approvals = (
+        db.query(AdminUser)
+        .filter(AdminUser.role == "pending")
+        .order_by(AdminUser.created_at.asc())
+        .limit(5)
+        .all()
+    )
+    for a in pending_approvals:
+        todos.append(_todo(
+            "consultant_approval",
+            f"老师账号待审核 · {a.real_name or a.username}",
+            a.phone or "请尽快完成审核",
+            "admin_user",
+            a.id,
+            "/consultant-approval",
+            "normal",
+            a.created_at,
+        ))
+
+    followup_reminders = []
+    # 会员 CRM 跟进提醒
+    try:
+        from models.followup import FollowUp
+        followups = (
+            db.query(FollowUp)
+            .filter(FollowUp.next_follow_date.isnot(None),
+                    FollowUp.next_follow_date < day_end,
+                    FollowUp.status.notin_(["closed", "lost"]))
+            .order_by(FollowUp.next_follow_date.asc())
+            .limit(20)
+            .all()
+        )
+        for f in followups:
+            member = db.query(Member).filter(Member.id == f.member_id).first()
+            consultant = db.query(Consultant).filter(Consultant.id == member.consultant_id).first() if member and member.consultant_id else None
+            overdue_days = max(0, (day - f.next_follow_date.date()).days) if f.next_follow_date else 0
+            followup_reminders.append({
+                "source": "member_followup",
+                "source_label": "客户跟进",
+                "member_id": f.member_id,
+                "member_name": member.name if member else "",
+                "enterprise_name": member.enterprise_name if member else "",
+                "consultant_id": consultant.id if consultant else None,
+                "consultant_name": consultant.name if consultant else "",
+                "next_follow_at": _iso_dt(f.next_follow_date),
+                "overdue_days": overdue_days,
+                "last_follow_at": _iso_dt(f.created_at),
+                "followup_count": 1,
+                "status_label": {"intention": "意向客户", "following": "跟进中", "silent": "沉默客户"}.get(f.status, f.status),
+                "ref": {"type": "follow_up", "id": f.id},
+                "action_url": f"/members/{f.member_id}",
+            })
+    except Exception:
+        pass
+
+    # 课程课后跟进提醒
+    try:
+        from models.course_session import CourseEnrollment as CourseEnrollmentV2, CourseSession as CourseSessionV2
+        course_followups = (
+            db.query(CourseEnrollmentV2)
+            .filter(CourseEnrollmentV2.signed_deal == False,
+                    CourseEnrollmentV2.status == "follow_up",
+                    CourseEnrollmentV2.next_followup_date.isnot(None),
+                    CourseEnrollmentV2.next_followup_date <= day)
+            .order_by(CourseEnrollmentV2.next_followup_date.asc())
+            .limit(15)
+            .all()
+        )
+        for e in course_followups:
+            member = db.query(Member).filter(Member.id == e.member_id).first()
+            consultant = db.query(Consultant).filter(Consultant.id == e.consultant_id).first() if e.consultant_id else None
+            session_obj = db.query(CourseSessionV2).filter(CourseSessionV2.id == e.session_id).first()
+            followup_reminders.append({
+                "source": "course_enrollment",
+                "source_label": "课后跟进",
+                "member_id": e.member_id,
+                "member_name": member.name if member else "",
+                "enterprise_name": member.enterprise_name if member else "",
+                "consultant_id": e.consultant_id,
+                "consultant_name": consultant.name if consultant else "",
+                "next_follow_at": _iso_date(e.next_followup_date),
+                "overdue_days": max(0, (day - e.next_followup_date).days) if e.next_followup_date else 0,
+                "last_follow_at": _iso_dt(e.last_followup_at),
+                "followup_count": e.followup_count or 0,
+                "status_label": session_obj.title if session_obj else "课后跟进",
+                "ref": {"type": "course_enrollment", "id": e.id},
+                "action_url": f"/course-sessions",
+            })
+    except Exception:
+        pass
+
+    # 工单回访阶段提醒
+    followup_orders = (
+        db.query(ServiceOrder)
+        .filter(ServiceOrder.status == "follow_up")
+        .order_by(ServiceOrder.updated_at.asc())
+        .limit(10)
+        .all()
+    )
+    for o in followup_orders:
+        member = db.query(Member).filter(Member.id == o.member_id).first() if o.member_id else None
+        consultant = db.query(Consultant).filter(Consultant.id == o.consultant_id).first() if o.consultant_id else None
+        ref_day = o.updated_at.date() if o.updated_at else day
+        followup_reminders.append({
+            "source": "service_order",
+            "source_label": "工单回访",
+            "member_id": o.member_id,
+            "member_name": member.name if member else "",
+            "enterprise_name": member.enterprise_name if member else "",
+            "consultant_id": o.consultant_id,
+            "consultant_name": consultant.name if consultant else "",
+            "next_follow_at": _iso_dt(o.updated_at) or _iso_date(o.appoint_date),
+            "overdue_days": max(0, (day - ref_day).days),
+            "last_follow_at": _iso_dt(o.updated_at),
+            "followup_count": 0,
+            "status_label": o.workflow_stage or "跟进回访",
+            "ref": {"type": "service_order", "id": o.id},
+            "action_url": f"/service-orders/{o.id}",
+        })
+
+    followup_reminders.sort(key=lambda x: (x.get("overdue_days", 0), x.get("next_follow_at") or ""), reverse=True)
+    followup_reminders = followup_reminders[:30]
+
+    due_today_count = sum(1 for t in todos if t["category"] == "payment_due" and t["priority"] == "high")
+    followup_overdue = sum(1 for f in followup_reminders if f.get("overdue_days", 0) > 0)
+    followup_due_today = sum(1 for f in followup_reminders if f.get("overdue_days", 0) == 0)
+
+    return ok({
+        "date": day.isoformat(),
+        "kpi": {
+            "today": {
+                "payment_amount": today_payment_amount,
+                "payment_count": today_payment_count,
+                "new_members": today_new_members,
+                "service_orders_today": today_service_orders,
+                "bookings_today": today_bookings,
+                "course_sessions_today": today_course_sessions,
+            },
+            "month": {
+                "payment_amount": month_payment_amount,
+                "debt_amount": month_debt_amount,
+                "service_stores": month_service_stores,
+            },
+        },
+        "todos": todos[:30],
+        "followup_reminders": followup_reminders,
+        "summary": {
+            "todo_total": len(todos),
+            "followup_total": len(followup_reminders),
+            "followup_overdue": followup_overdue,
+            "followup_due_today": followup_due_today,
+            "payment_due_today": due_today_count,
         },
     })
 

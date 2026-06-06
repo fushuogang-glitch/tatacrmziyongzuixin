@@ -16,7 +16,7 @@ const menuGroups = [
   {
     label: '总览', icon: 'Odometer',
     items: [
-      { path: '/dashboard', title: '数据看板', icon: 'DataLine', adminOnly: true },
+      { path: '/dashboard', title: '经营驾驶舱', icon: 'DataLine', adminOnly: true },
       { path: '/calendar', title: '日历看板', icon: 'Calendar' },
       { path: '/my-dashboard', title: '我的看板', icon: 'TrendCharts', consultantOnly: true },
     ],
