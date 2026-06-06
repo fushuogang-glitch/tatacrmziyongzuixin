@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, onMounted } from 'vue';
+import { computed, ref, onMounted, onUnmounted } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useUserStore } from '../store/user';
 import { API } from '../api';
@@ -10,6 +10,8 @@ const router = useRouter();
 const user = useUserStore();
 
 const badges = ref<Record<string, number>>({});
+const viewportWidth = ref(typeof window === 'undefined' ? 1440 : window.innerWidth);
+const mobileDrawerVisible = ref(false);
 
 // 分组菜单
 const menuGroups = [
@@ -109,10 +111,30 @@ const defaultOpeneds = computed(() => {
   const idx = visibleGroups.value.findIndex(g => g.items.some(m => route.path.startsWith(m.path)));
   return idx >= 0 ? [`group-${idx}`] : ['group-0'];
 });
+const drawerDefaultOpeneds = computed(() => {
+  const idx = visibleGroups.value.findIndex(g => g.items.some(m => route.path.startsWith(m.path)));
+  return idx >= 0 ? [`mobile-group-${idx}`] : ['mobile-group-0'];
+});
+
+const isMobile = computed(() => viewportWidth.value <= 767);
+const isTablet = computed(() => viewportWidth.value > 767 && viewportWidth.value <= 1180);
+const asideWidth = computed(() => {
+  if (isMobile.value) return '0px';
+  return isTablet.value ? '190px' : '220px';
+});
+
+function updateViewport() {
+  viewportWidth.value = window.innerWidth;
+  if (!isMobile.value) mobileDrawerVisible.value = false;
+}
 
 function handleLogout() {
   user.logout();
   router.push('/login');
+}
+
+function handleMenuSelect() {
+  if (isMobile.value) mobileDrawerVisible.value = false;
 }
 
 // 角标路径映射：red = 待处理（红），green = 进行中（绿）
@@ -167,19 +189,24 @@ async function loadBadges() {
 }
 
 onMounted(() => {
+  window.addEventListener('resize', updateViewport);
   loadBadges();
   setInterval(loadBadges, 30000); // 每30秒刷新
+});
+
+onUnmounted(() => {
+  window.removeEventListener('resize', updateViewport);
 });
 </script>
 
 <template>
-  <el-container style="height: 100vh;">
-    <el-aside width="220px" class="aside">
+  <el-container class="app-shell">
+    <el-aside v-show="!isMobile" :width="asideWidth" class="aside">
       <div class="logo">
         <span class="logo-main">TATA CONSULTING®</span>
         <span class="logo-sub">塔塔咨询 CRM</span>
       </div>
-      <el-menu :default-active="active" :default-openeds="defaultOpeneds" router class="menu" :unique-opened="false">
+      <el-menu :default-active="active" :default-openeds="defaultOpeneds" router class="menu" :unique-opened="false" @select="handleMenuSelect">
         <template v-for="(g, gi) in visibleGroups" :key="gi">
           <!-- 分组只有1项时直接平铺 -->
           <el-menu-item v-if="g.items.length === 1" :index="g.items[0].path">
@@ -212,10 +239,15 @@ onMounted(() => {
     </el-aside>
     <el-container>
       <el-header class="header">
-        <div class="title">{{ route.meta?.title }}</div>
+        <div class="header-left">
+          <el-button v-if="isMobile" text class="mobile-menu-btn" @click="mobileDrawerVisible = true">
+            <el-icon><Menu /></el-icon>
+          </el-button>
+          <div class="title">{{ route.meta?.title }}</div>
+        </div>
         <div class="user">
           <NotifBell v-if="user.role !== 'consultant'" />
-          <span style="margin-left:12px">{{ user.realName || user.username || '管理员' }}</span>
+          <span class="user-name">{{ user.realName || user.username || '管理员' }}</span>
           <el-tag size="small" style="margin-left:6px"
             :type="user.role === 'super_admin' ? 'danger' : user.role === 'consultant' ? 'success' : 'warning'">
             {{ user.role === 'super_admin' ? '超级管理员' : user.role === 'consultant' ? '老师' : '管理员' }}
@@ -237,9 +269,51 @@ onMounted(() => {
       </el-main>
     </el-container>
   </el-container>
+
+  <el-drawer
+    v-model="mobileDrawerVisible"
+    direction="ltr"
+    size="82%"
+    :with-header="false"
+    custom-class="mobile-drawer"
+  >
+    <div class="logo drawer-logo">
+      <span class="logo-main">TATA CONSULTING®</span>
+      <span class="logo-sub">塔塔咨询 CRM</span>
+    </div>
+    <el-menu :default-active="active" :default-openeds="drawerDefaultOpeneds" router class="menu drawer-menu" :unique-opened="false" @select="handleMenuSelect">
+      <template v-for="(g, gi) in visibleGroups" :key="gi">
+        <el-menu-item v-if="g.items.length === 1" :index="g.items[0].path">
+          <el-icon><component :is="g.items[0].icon" /></el-icon>
+          <template #title>
+            <span style="flex:1">{{ g.items[0].title }}</span>
+            <span v-if="getBadgeRed(g.items[0].path) > 0" class="menu-num menu-num-red">{{ getBadgeRed(g.items[0].path) > 99 ? '99+' : getBadgeRed(g.items[0].path) }}</span>
+            <span v-if="getBadgeGreen(g.items[0].path) > 0" class="menu-num menu-num-green">{{ getBadgeGreen(g.items[0].path) > 99 ? '99+' : getBadgeGreen(g.items[0].path) }}</span>
+          </template>
+        </el-menu-item>
+        <el-sub-menu v-else :index="`mobile-group-${gi}`">
+          <template #title>
+            <el-icon><component :is="g.icon" /></el-icon>
+            <span style="flex:1">{{ g.label }}</span>
+            <span v-if="getGroupBadge(g.items) > 0" class="menu-num menu-num-red">{{ getGroupBadge(g.items) > 99 ? '99+' : getGroupBadge(g.items) }}</span>
+            <span v-else-if="getGroupBadgeGreen(g.items) > 0" class="menu-num menu-num-green">{{ getGroupBadgeGreen(g.items) > 99 ? '99+' : getGroupBadgeGreen(g.items) }}</span>
+          </template>
+          <el-menu-item v-for="m in g.items" :key="m.path" :index="m.path">
+            <el-icon><component :is="m.icon" /></el-icon>
+            <template #title>
+              <span style="flex:1">{{ m.title }}</span>
+              <span v-if="getBadgeRed(m.path) > 0" class="menu-num menu-num-red">{{ getBadgeRed(m.path) > 99 ? '99+' : getBadgeRed(m.path) }}</span>
+              <span v-if="getBadgeGreen(m.path) > 0" class="menu-num menu-num-green">{{ getBadgeGreen(m.path) > 99 ? '99+' : getBadgeGreen(m.path) }}</span>
+            </template>
+          </el-menu-item>
+        </el-sub-menu>
+      </template>
+    </el-menu>
+  </el-drawer>
 </template>
 
 <style scoped>
+.app-shell { height: 100vh; min-width: 0; }
 .aside { background: #1f2d3d; color: #fff; overflow-y: auto; }
 .logo { padding: 24px 20px; border-bottom: 1px solid #2d3e52; }
 .logo-main { display: block; font-size: 18px; font-weight: 700; letter-spacing: 2px; color: #fff; }
@@ -253,10 +327,31 @@ onMounted(() => {
 .menu :deep(.el-sub-menu .el-menu) { background: #1a2738; }
 .menu :deep(.el-sub-menu .el-menu-item) { padding-left: 48px !important; font-size: 13px; }
 .header { display: flex; justify-content: space-between; align-items: center; background: #fff; border-bottom: 1px solid #ebeef5; }
+.header-left { display: flex; align-items: center; min-width: 0; }
+.mobile-menu-btn { margin-right: 8px; font-size: 18px; }
 .title { font-size: 16px; font-weight: 600; }
-.user { color: #606266; font-size: 14px; cursor: pointer; }
-.main { padding: 20px; background: #f5f7fa; }
+.user { color: #606266; font-size: 14px; cursor: pointer; white-space: nowrap; }
+.user-name { margin-left: 12px; }
+.main { padding: 20px; background: #f5f7fa; min-width: 0; overflow-x: hidden; }
 .menu-num { display: inline-flex; align-items: center; justify-content: center; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 10px; color: #fff; font-size: 11px; font-weight: 500; line-height: 1; margin-left: 6px; }
 .menu-num-red { background: #f56c6c; }
 .menu-num-green { background: #67c23a; }
+
+.drawer-logo { background: #1f2d3d; }
+.drawer-menu { min-height: calc(100vh - 82px); }
+
+@media (max-width: 1180px) {
+  .logo { padding: 20px 14px; }
+  .logo-main { font-size: 15px; letter-spacing: 1px; }
+  .menu :deep(.el-sub-menu .el-menu-item) { padding-left: 38px !important; }
+  .main { padding: 16px; }
+}
+
+@media (max-width: 767px) {
+  .app-shell { height: 100dvh; }
+  .header { height: 52px; padding: 0 10px; }
+  .title { font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .user-name { display: none; }
+  .main { padding: 10px; }
+}
 </style>

@@ -512,5 +512,92 @@ onMounted(() => { if (localStorage.getItem(TOKEN_KEY)) load(); });
 @media (max-width: 1280px) {
   .cockpit-grid { grid-template-columns: repeat(3, 1fr); }
   .work-grid { grid-template-columns: 1fr; }
+  .stat-grid.g5 { grid-template-columns: repeat(3, 1fr); }
+  .rank-grid { grid-template-columns: repeat(2, 1fr); }
+}
+
+@media (max-width: 900px) {
+  .filter-bar {
+    align-items: flex-start;
+    gap: 10px;
+    flex-direction: column;
+  }
+  .filter-right {
+    width: 100%;
+    flex-wrap: wrap;
+  }
+  .cockpit-hero {
+    align-items: flex-start;
+    gap: 12px;
+    flex-direction: column;
+  }
+  .hero-summary {
+    width: 100%;
+    flex-wrap: wrap;
+  }
+  .cockpit-grid { grid-template-columns: repeat(2, 1fr); }
+  .stat-grid.g5 { grid-template-columns: repeat(2, 1fr); }
+  .rank-grid { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 640px) {
+  .dash { padding: 0; }
+  .page-title { font-size: 17px; }
+  .filter-right :deep(.el-select) { flex: 1; min-width: 120px; }
+  .cockpit-hero {
+    padding: 15px;
+    border-radius: 8px;
+  }
+  .hero-title { font-size: 18px; }
+  .hero-sub { line-height: 1.5; }
+  .hero-summary span {
+    height: 26px;
+    padding: 0 10px;
+  }
+  .cockpit-grid,
+  .stat-grid.g5 {
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
+  .card { padding: 9px 6px; }
+  .card-num { font-size: 20px; }
+  .card-num.sm { font-size: 15px; }
+  .work-card :deep(.el-card__body) {
+    max-height: none;
+    overflow-y: visible;
+  }
+  .panel-head {
+    align-items: flex-start;
+    gap: 8px;
+    flex-direction: column;
+  }
+  .todo-row {
+    grid-template-columns: 52px 1fr;
+  }
+  .todo-time {
+    grid-column: 2;
+    text-align: left;
+  }
+  .follow-top {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+  .follow-sub {
+    white-space: normal;
+    line-height: 1.45;
+  }
+  .section-title {
+    margin-top: 16px;
+    letter-spacing: 1px;
+  }
+  .rank-card :deep(.el-card__header) { padding: 8px 10px; }
+  .rank-card :deep(.el-card__body) { padding: 4px 10px 8px; }
+}
+
+@media (max-width: 390px) {
+  .cockpit-grid,
+  .stat-grid.g5 {
+    grid-template-columns: 1fr;
+  }
 }
 </style>
