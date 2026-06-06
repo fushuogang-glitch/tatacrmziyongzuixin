@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from database import get_db, Base
 from services.audit_service import log_action
+from utils.auth import get_current_admin
 
 # ══════════════════ ORM ══════════════════
 class Article(Base):
@@ -112,7 +113,7 @@ def get_article(article_id: int, db: Session = Depends(get_db)):
     }
 
 # ══════════════════ 管理端 API ══════════════════
-admin_router = APIRouter(prefix="/admin/articles", tags=["articles-admin"])
+admin_router = APIRouter(prefix="/admin/articles", tags=["articles-admin"], dependencies=[Depends(get_current_admin)])
 
 CATEGORY_MAP = {
     "culture": "企业文化",

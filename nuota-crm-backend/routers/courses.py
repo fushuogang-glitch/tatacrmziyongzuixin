@@ -9,6 +9,7 @@ from sqlalchemy import Column, Integer, String, Text, DateTime, Numeric, Boolean
 from sqlalchemy.orm import Session
 
 from database import get_db, Base
+from utils.auth import get_current_admin, get_current_member
 
 # ══════════════════ ORM ══════════════════
 
@@ -154,7 +155,7 @@ def get_course(course_id: int, db: Session = Depends(get_db)):
 
 
 # ══════════════════ 管理端路由 ══════════════════
-admin_router = APIRouter(prefix="/admin/courses", tags=["courses-admin"])
+admin_router = APIRouter(prefix="/admin/courses", tags=["courses-admin"], dependencies=[Depends(get_current_admin)])
 
 @admin_router.get("")
 def admin_list_courses(
@@ -322,8 +323,10 @@ class CourseEnrollBody(BaseModel):
     attendee_phone: Optional[str] = None
 
 @router.post("/enroll")
-def enroll_course(body: CourseEnrollBody, db: Session = Depends(get_db)):
+def enroll_course(body: CourseEnrollBody, db: Session = Depends(get_db), current = Depends(get_current_member)):
     """小程序端课程报名"""
+    if body.member_id and body.member_id != current.id:
+        raise HTTPException(403, "无权为其他会员报名")
     course = db.query(Course).filter(Course.id == body.course_id).first()
     if not course:
         raise HTTPException(404, "课程不存在")
@@ -345,7 +348,7 @@ def enroll_course(body: CourseEnrollBody, db: Session = Depends(get_db)):
 
     enrollment = CourseEnrollment(
         course_id=body.course_id,
-        member_id=body.member_id,
+        member_id=current.id,
         member_name=body.attendee_name or "",
         member_phone=body.attendee_phone or "",
         status="pending",

@@ -76,10 +76,12 @@ def admin_login(body: AdminLoginIn, db: Session = Depends(get_db)):
 @router.post("/debug-login")
 async def debug_login(body: dict, db: Session = Depends(get_db)):
     """开发者工具调试专用，用member_id直接登录"""
+    if settings.is_production:
+        raise HTTPException(status_code=404, detail="接口不存在")
     member_id = body.get("member_id", 1)
     member = db.query(Member).filter(Member.id == member_id).first()
     if not member:
-        return fail("会员不存在")
+        raise HTTPException(status_code=404, detail="会员不存在")
     token = create_token(subject=member.id, role="member", extra={"openid": member.openid or "debug"})
     return ok({
         "need_register": False,

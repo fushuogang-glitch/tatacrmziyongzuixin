@@ -75,6 +75,12 @@ class SignBody(BaseModel):
     signature: Optional[str] = None  # 手写签名 base64（可选）
 
 
+def _resolve_member_id(current: Member, requested_member_id: Optional[int] = None) -> int:
+    if requested_member_id and requested_member_id != current.id:
+        raise HTTPException(403, "无权访问其他会员数据")
+    return current.id
+
+
 @router.get("/current")
 def get_current_agreement():
     """获取当前生效的协议内容"""
@@ -91,8 +97,7 @@ def get_current_agreement():
 
 @router.get("/check")
 def check_agreement_signed(member_id: Optional[int] = None, db: Session = Depends(get_db), current = Depends(get_current_member)):
-    if not member_id:
-        member_id = current.id
+    member_id = _resolve_member_id(current, member_id)
     """检查用户是否已签约最新版协议"""
     member = db.query(Member).filter(Member.id == member_id).first()
     if not member:
@@ -118,7 +123,7 @@ def sign_agreement(
     current: Member = Depends(get_current_member)
 ):
     """会员签约协议"""
-    mid = body.member_id or current.id
+    mid = _resolve_member_id(current, body.member_id)
     member = db.query(Member).filter(Member.id == mid).first()
     if not member:
         raise HTTPException(404, "会员不存在")
@@ -159,8 +164,7 @@ def sign_agreement(
 
 @router.get("/history")
 def agreement_history(member_id: Optional[int] = None, db: Session = Depends(get_db), current = Depends(get_current_member)):
-    if not member_id:
-        member_id = current.id
+    member_id = _resolve_member_id(current, member_id)
     """签约历史"""
     records = db.query(UserAgreement).filter(
         UserAgreement.member_id == member_id

@@ -25,6 +25,8 @@ python-multipart>=0.0.19,<1.0
 # === HTTP 客户端 ===
 httpx>=0.28,<0.30
 requests>=2.32,<3.0
+tencentcloud-sdk-python>=3.0,<4.0
+openpyxl>=3.1,<4.0
 
 # === 日志 ===
 loguru>=0.7,<1.0

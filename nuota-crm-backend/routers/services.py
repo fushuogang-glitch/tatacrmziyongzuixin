@@ -229,8 +229,7 @@ def list_services(category: Optional[str] = None, db: Session = Depends(get_db))
 
 @router.get("/grouped")
 def grouped_services(category: Optional[str] = None, member_id: Optional[int] = None, db: Session = Depends(get_db), current: Member = Depends(get_current_member)):
-    if not member_id:
-        member_id = current.id
+    member_id = _resolve_member_id(current, member_id)
     """按已合作/未合作分组返回服务列表"""
     q = db.query(Service).filter(Service.status == "active")
     if category:
@@ -285,6 +284,12 @@ def _enrich_order(o, db, admin=False):
             d['total_times'] = pkg.total_times
     return d
 
+def _resolve_member_id(current: Member, requested_member_id: Optional[int] = None) -> int:
+    """小程序端只能访问当前登录会员自己的数据。"""
+    if requested_member_id and requested_member_id != current.id:
+        raise HTTPException(403, "无权访问其他会员数据")
+    return current.id
+
 @router.get("/{service_id}")
 def get_service(service_id: int, db: Session = Depends(get_db)):
     s = db.query(Service).filter(Service.id == service_id).first()
@@ -294,8 +299,7 @@ def get_service(service_id: int, db: Session = Depends(get_db)):
 
 @router.get("/packages/my")
 def my_packages(member_id: Optional[int] = None, db: Session = Depends(get_db), current: Member = Depends(get_current_member)):
-    if not member_id:
-        member_id = current.id
+    member_id = _resolve_member_id(current, member_id)
     items = db.query(ServicePackage).filter(
         ServicePackage.member_id == member_id,
         ServicePackage.status == "active"
@@ -309,7 +313,7 @@ def my_packages(member_id: Optional[int] = None, db: Session = Depends(get_db), 
 @router.post("/orders")
 def create_order(body: OrderCreate, current: Member = Depends(get_current_member), db: Session = Depends(get_db)):
     """会员预约专案服务 → 生成工单"""
-    mid = body.member_id or current.id
+    mid = _resolve_member_id(current, body.member_id)
     member = db.query(Member).filter(Member.id == mid).first()
     if not member:
         raise HTTPException(404, "会员不存在")
@@ -376,8 +380,7 @@ def create_order(body: OrderCreate, current: Member = Depends(get_current_member
 
 @router.get("/orders/my")
 def my_orders(member_id: Optional[int] = None, status: Optional[str] = None, db: Session = Depends(get_db), current: Member = Depends(get_current_member)):
-    if not member_id:
-        member_id = current.id
+    member_id = _resolve_member_id(current, member_id)
     q = db.query(ServiceOrder).filter(ServiceOrder.member_id == member_id)
     if status:
         q = q.filter(ServiceOrder.status == status)
@@ -385,16 +388,22 @@ def my_orders(member_id: Optional[int] = None, status: Optional[str] = None, db:
     return ok([_enrich_order(o, db) for o in items])
 
 @router.get("/orders/{order_id}")
-def get_order(order_id: int, db: Session = Depends(get_db)):
-    o = db.query(ServiceOrder).filter(ServiceOrder.id == order_id).first()
+def get_order(order_id: int, db: Session = Depends(get_db), current: Member = Depends(get_current_member)):
+    o = db.query(ServiceOrder).filter(
+        ServiceOrder.id == order_id,
+        ServiceOrder.member_id == current.id,
+    ).first()
     if not o:
         raise HTTPException(404, "工单不存在")
     return ok(_enrich_order(o, db))
 
 @router.post("/orders/{order_id}/rating")
-def submit_rating(order_id: int, body: RatingSubmit, db: Session = Depends(get_db)):
+def submit_rating(order_id: int, body: RatingSubmit, db: Session = Depends(get_db), current: Member = Depends(get_current_member)):
     """会员提交满意度评价（整体执案结束后）"""
-    o = db.query(ServiceOrder).filter(ServiceOrder.id == order_id).first()
+    o = db.query(ServiceOrder).filter(
+        ServiceOrder.id == order_id,
+        ServiceOrder.member_id == current.id,
+    ).first()
     if not o:
         raise HTTPException(404, "工单不存在")
     if o.status not in ("follow_up", "completed"):
@@ -414,9 +423,12 @@ def submit_rating(order_id: int, body: RatingSubmit, db: Session = Depends(get_d
 
 # ── 小程序端：查看工单执案日志（只读） ──
 @router.get("/orders/{order_id}/logs")
-def order_logs(order_id: int, db: Session = Depends(get_db)):
+def order_logs(order_id: int, db: Session = Depends(get_db), current: Member = Depends(get_current_member)):
     """客户查看工单执案日志（老师填写的日志实时同步到小程序）"""
-    o = db.query(ServiceOrder).filter(ServiceOrder.id == order_id).first()
+    o = db.query(ServiceOrder).filter(
+        ServiceOrder.id == order_id,
+        ServiceOrder.member_id == current.id,
+    ).first()
     if not o:
         raise HTTPException(404, "工单不存在")
     logs = (
@@ -444,9 +456,12 @@ def order_logs(order_id: int, db: Session = Depends(get_db)):
 
 # ── 小程序端：查看工单详细进度（工作流状态） ──
 @router.get("/orders/{order_id}/progress")
-def order_progress(order_id: int, db: Session = Depends(get_db)):
+def order_progress(order_id: int, db: Session = Depends(get_db), current: Member = Depends(get_current_member)):
     """客户查看工单实时进度（排期确认/老师接单/执案中/跟进/完成）"""
-    o = db.query(ServiceOrder).filter(ServiceOrder.id == order_id).first()
+    o = db.query(ServiceOrder).filter(
+        ServiceOrder.id == order_id,
+        ServiceOrder.member_id == current.id,
+    ).first()
     if not o:
         raise HTTPException(404, "工单不存在")
     service = db.query(Service).filter(Service.id == o.service_id).first() if o.service_id else None
@@ -481,7 +496,11 @@ def order_progress(order_id: int, db: Session = Depends(get_db)):
 
 # ══════════════════ 管理端路由 ══════════════════
 
-admin_router = APIRouter(prefix="/admin/services", tags=["专案服务-管理端"])
+admin_router = APIRouter(
+    prefix="/admin/services",
+    tags=["专案服务-管理端"],
+    dependencies=[Depends(get_current_admin_or_consultant)],
+)
 
 @admin_router.get("", response_model=List[ServiceOut])
 def admin_list_services(db: Session = Depends(get_db)):

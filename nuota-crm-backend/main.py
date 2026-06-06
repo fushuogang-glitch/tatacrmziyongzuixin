@@ -46,7 +46,7 @@ from routers.course_sessions import (
 from routers.agents import router as agents_router
 from routers.webhook_events import router as webhook_events_router, admin_router as webhook_admin_router
 from routers.agent_api import router as agent_api_router
-from utils.auth import hash_password
+from utils.auth import hash_password, get_current_admin
 
 
 def _ensure_admin():
@@ -63,7 +63,7 @@ def _ensure_admin():
                 status="active",
             ))
             db.commit()
-            logger.info(f"已创建默认管理员：{settings.ADMIN_USERNAME} / {settings.ADMIN_PASSWORD}")
+            logger.info(f"已创建默认管理员：{settings.ADMIN_USERNAME}")
     finally:
         db.close()
 
@@ -139,7 +139,7 @@ app = FastAPI(
 # CORS：允许管理后台 / 小程序（小程序自身不受 CORS 限制）
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=settings.allowed_origins_list,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -160,7 +160,7 @@ def health():
 
 
 @app.post("/admin/migrate-consultant-v2", tags=["system"])
-def migrate_consultant_v2(db: Session = Depends(get_db)):
+def migrate_consultant_v2(db: Session = Depends(get_db), _=Depends(get_current_admin)):
     """一次性迁移：加顾问字段+新建两张表"""
     from sqlalchemy import text
     results = []
@@ -265,8 +265,8 @@ app.include_router(upload_router)
 # ── 静态文件 ──
 from starlette.staticfiles import StaticFiles
 import os
-os.makedirs('/www/nuota-crm/static/uploads', exist_ok=True)
-app.mount('/static', StaticFiles(directory='/www/nuota-crm/static'), name='static')
+os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
+app.mount('/static', StaticFiles(directory=settings.STATIC_DIR), name='static')
 
 # ── 微信支付 ──
 from routers.payment import router as payment_router

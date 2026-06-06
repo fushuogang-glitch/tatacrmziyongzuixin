@@ -6,23 +6,31 @@ from cryptography.hazmat.primitives.asymmetric.padding import PKCS1v15
 from cryptography.hazmat.primitives.hashes import SHA256
 import requests as http_req
 
+from config import settings
+
 logger = logging.getLogger('wechat_pay')
 
 # ---- 子商户配置 ----
-SUB_MCH_ID   = '1718951748'
-SUB_APPID     = 'wxf6a6e4ce11b11dd8'
-APIV3_KEY     = 'TaTa2026WxPaySecretKeyAB12345678'
-CERT_SERIAL   = '5A94F342ADA2DDB0E3C5BBFC6F905756A85C7B47'
-CERT_DIR      = '/www/nuota-crm/certs'
-NOTIFY_URL    = 'https://crm.tata-cn.com/api/v1/pay/notify'
+SUB_MCH_ID   = settings.WXPAY_SUB_MCH_ID
+SUB_APPID     = settings.WXPAY_SUB_APPID
+APIV3_KEY     = settings.WXPAY_APIV3_KEY
+CERT_SERIAL   = settings.WXPAY_CERT_SERIAL
+CERT_DIR      = settings.WXPAY_CERT_DIR
+NOTIFY_URL    = settings.WXPAY_NOTIFY_URL
 
 # 服务商信息
-SP_MCH_ID     = '1800009908'
-SP_APPID      = ''  # 服务商appid，如果没有用空串
+SP_MCH_ID     = settings.WXPAY_SP_MCH_ID
+SP_APPID      = settings.WXPAY_SP_APPID  # 服务商appid，如果没有用空串
 
 _private_key = None
 
+def _require_config(*names: str) -> None:
+    missing = [name for name in names if not globals().get(name)]
+    if missing:
+        raise RuntimeError(f"微信支付配置缺失: {', '.join(missing)}")
+
 def _get_private_key():
+    _require_config('CERT_DIR')
     global _private_key
     if _private_key is None:
         with open(f'{CERT_DIR}/apiclient_key.pem', 'rb') as f:
@@ -58,6 +66,7 @@ def create_jsapi_order(openid: str, out_trade_no: str, total_fee: int, descripti
     JSAPI下单（子商户自己下单模式）
     文档：https://pay.weixin.qq.com/doc/v3/merchant/4012791858
     """
+    _require_config('SUB_MCH_ID', 'SUB_APPID', 'CERT_SERIAL', 'CERT_DIR', 'NOTIFY_URL')
     url_path = '/v3/pay/transactions/jsapi'
     url = f'https://api.mch.weixin.qq.com{url_path}'
 
@@ -104,6 +113,7 @@ def create_jsapi_order(openid: str, out_trade_no: str, total_fee: int, descripti
 
 def decrypt_notify(headers: dict, body: str) -> dict:
     """解密支付回调通知（APIv3 AEAD_AES_256_GCM）"""
+    _require_config('APIV3_KEY')
     from cryptography.hazmat.primitives.ciphers.aead import AESGCM
     data = json.loads(body)
     resource = data.get('resource', {})

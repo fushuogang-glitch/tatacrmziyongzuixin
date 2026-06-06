@@ -10,7 +10,7 @@ from typing import Optional
 from database import get_db
 from models.member import Member
 from models.course_session import CourseSession, CourseEnrollment
-from services.wechat_pay import create_jsapi_order, decrypt_notify
+from services.wechat_pay import SUB_APPID, SUB_MCH_ID, create_jsapi_order, decrypt_notify
 from routers.members import get_current_member
 
 logger = logging.getLogger('payment')
@@ -100,6 +100,20 @@ async def pay_notify(request: Request, db: DBSession = Depends(get_db)):
             CourseEnrollment.out_trade_no == out_trade_no
         ).first()
         if enroll:
+            amount = result.get('amount') or {}
+            paid_fen = int(float(enroll.paid_amount or 0) * 100)
+            notify_fen = int(amount.get('total') or 0)
+            if SUB_MCH_ID and result.get('mchid') not in (SUB_MCH_ID, None):
+                logger.warning(f'pay notify mchid mismatch: order={out_trade_no}')
+                return JSONResponse({'code': 'FAIL', 'message': '商户号不匹配'}, status_code=400)
+            if SUB_APPID and result.get('appid') not in (SUB_APPID, None):
+                logger.warning(f'pay notify appid mismatch: order={out_trade_no}')
+                return JSONResponse({'code': 'FAIL', 'message': 'appid不匹配'}, status_code=400)
+            if paid_fen != notify_fen:
+                logger.warning(f'pay notify amount mismatch: order={out_trade_no}, expected={paid_fen}, actual={notify_fen}')
+                return JSONResponse({'code': 'FAIL', 'message': '金额不匹配'}, status_code=400)
+            if getattr(enroll, 'pay_status', None) == 'paid':
+                return JSONResponse({'code': 'SUCCESS', 'message': '成功'})
             enroll.pay_status = 'paid'
             enroll.paid_at = datetime.now()
             enroll.transaction_id = result.get('transaction_id', '')

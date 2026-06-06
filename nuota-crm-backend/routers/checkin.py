@@ -139,7 +139,7 @@ def face_checkin(body: FaceCheckinIn, db: Session = Depends(get_db),
     if not current.face_token:
         raise HTTPException(status_code=400, detail="请先绑定人脸")
 
-    r = face_service.verify(current.face_token, body.face_base64)
+    r = face_service.verify(current.id, body.face_base64)
     if not r.get("ok"):
         raise HTTPException(status_code=400, detail=r.get("msg", "人脸识别失败"))
 
