@@ -47,6 +47,7 @@ from routers.agents import router as agents_router
 from routers.webhook_events import router as webhook_events_router, admin_router as webhook_admin_router
 from routers.agent_api import router as agent_api_router
 from routers.saas_bridge import router as saas_bridge_router
+from routers.daily_thought import api_router as daily_thought_router, admin_router as daily_thought_admin_router
 from utils.auth import hash_password, get_current_admin
 
 
@@ -222,6 +223,7 @@ app.include_router(bookings_router)
 app.include_router(handbooks_router)
 app.include_router(services_router)
 app.include_router(agreements_router)
+app.include_router(daily_thought_router)
 
 # ---- 管理端路由 ----
 app.include_router(auth_admin_router)
@@ -254,6 +256,7 @@ app.include_router(webhook_events_router)
 app.include_router(webhook_admin_router)
 app.include_router(agent_api_router)
 app.include_router(saas_bridge_router)
+app.include_router(daily_thought_admin_router)
 
 
 if __name__ == "__main__":

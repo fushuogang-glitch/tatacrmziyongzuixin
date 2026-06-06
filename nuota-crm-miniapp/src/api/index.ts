@@ -105,6 +105,11 @@ export const api = {
   signAgreement: (body: { member_id: number; signature?: string }) =>
     request({ url: '/api/v1/agreements/sign', method: 'POST', data: body }),
 
+  // 每日一念
+  dailyThought: () => request({ url: '/api/daily-thought/today' }),
+  dailyThoughtSaveProfile: (body: any) =>
+    request({ url: '/api/daily-thought/profile', method: 'PUT', data: body }),
+
   // 文章/动态
   articleList: (params?: { category?: string }) =>
     request({ url: '/api/v1/articles', data: params || {} }),

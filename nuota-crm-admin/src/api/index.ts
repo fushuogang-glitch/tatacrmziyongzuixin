@@ -150,6 +150,9 @@ export const API = {
   followupList: (memberId: number) => http.get(`/admin/members/${memberId}/followups`),
   followupAdd: (memberId: number, body: any) => http.post(`/admin/members/${memberId}/followups`, body),
   followupDelete: (id: number) => http.delete(`/admin/followups/${id}`),
+  dailyThoughtProfile: (memberId: number) => http.get(`/admin/daily-thought/members/${memberId}/profile`),
+  dailyThoughtProfileSave: (memberId: number, body: any) =>
+    http.put(`/admin/daily-thought/members/${memberId}/profile`, body),
 
   // 操作日志
   operationLogs: (params?: any) => http.get('/admin/operation-logs', { params }),

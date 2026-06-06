@@ -7,6 +7,15 @@
     </view>
 
     <scroll-view scroll-y class="scroll">
+      <view class="daily-card" @tap="go('/pages/daily-thought/index')" v-if="daily.word">
+        <view>
+          <text class="daily-label">每日一念 · {{ daily.date }}</text>
+          <text class="daily-word">{{ daily.word }}</text>
+          <text class="daily-meaning">{{ daily.meaning }}</text>
+        </view>
+        <text class="daily-arr">→</text>
+      </view>
+
       <!-- 预约入口 -->
       <view class="section">
         <view class="sec-head">
@@ -124,6 +133,7 @@ const promoItems = ref<any[]>([]);
 const newsItems = ref<any[]>([]);
 const cultureItems = ref<any[]>([]);
 const videoItems = ref<any[]>([]);
+const daily = ref<any>({});
 
 // 按当前Tab过滤
 const filteredList = computed(() => {
@@ -175,6 +185,14 @@ async function loadArticles() {
   }
 }
 
+async function loadDaily() {
+  try {
+    daily.value = await api.dailyThought();
+  } catch (e) {
+    daily.value = {};
+  }
+}
+
 function onArticleTap(ev: any) {
   if (!ev.id) return;
   if (activeTab.value === 'video') {
@@ -195,6 +213,7 @@ function go(url: string) {
 }
 
 onMounted(async () => {
+  loadDaily();
   loadArticles();
   // 检查协议签约
   try {
@@ -221,6 +240,38 @@ onMounted(async () => {
   padding: 60rpx 56rpx 32rpx;
   border-bottom: 1rpx solid #ebe8e2;
 }
+.daily-card {
+  margin: 28rpx 28rpx 8rpx;
+  padding: 28rpx 30rpx;
+  border-radius: 26rpx;
+  background: linear-gradient(135deg, #211c16 0%, #4c3922 100%);
+  color: #fff;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  box-shadow: 0 10rpx 30rpx rgba(30, 22, 12, .12);
+}
+.daily-label {
+  display: block;
+  color: #c9a96e;
+  font-size: 22rpx;
+  letter-spacing: 3rpx;
+}
+.daily-word {
+  display: block;
+  margin-top: 10rpx;
+  font-size: 44rpx;
+  letter-spacing: 10rpx;
+}
+.daily-meaning {
+  display: block;
+  margin-top: 8rpx;
+  max-width: 560rpx;
+  color: rgba(255,255,255,.72);
+  font-size: 24rpx;
+  line-height: 1.5;
+}
+.daily-arr { color: #c9a96e; font-size: 42rpx; padding-left: 20rpx; }
 .brand-mark {
   font-size: 40rpx;
   letter-spacing: 10rpx;

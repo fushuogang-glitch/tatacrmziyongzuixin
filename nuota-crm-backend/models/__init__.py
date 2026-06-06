@@ -19,6 +19,7 @@ from models.webhook_event import WebhookEvent
 from models.purchase import Purchase
 from models.recharge import Recharge, RechargeConsumption
 from models.deep_analysis import MemberDeepAnalysis, ConsultantTalentAnalysis
+from models.daily_thought import MemberDailyProfile, DailyThoughtRecord
 
 __all__ = [
     "Member", "Payment", "PaymentService",
@@ -37,4 +38,5 @@ __all__ = [
     "CourseSession", "CourseEnrollmentV2", "CourseCheckin", "CourseFollowup",
     "AgentApiKey", "WebhookEvent",
     "MemberDeepAnalysis", "ConsultantTalentAnalysis",
+    "MemberDailyProfile", "DailyThoughtRecord",
 ]

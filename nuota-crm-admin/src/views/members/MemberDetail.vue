@@ -18,7 +18,18 @@ const followups = ref<any[]>([]);
 const loading = ref(false);
 const fuLoading = ref(false);
 const savingHistory = ref(false);
+const savingDailyProfile = ref(false);
 const historyForm = reactive({ course: 0, service: 0, referral: 0 });
+const dailyProfile = reactive<any>({
+  birth_date: '',
+  birth_time: '',
+  bazi_text: '',
+  auspicious_keyword: '',
+  color_personality: '',
+  mbti: '',
+  teacher_notes: '',
+  monthly_fortune: '',
+});
 
 const STATUS_OPTS = [
   { value: 'intention', label: '意向客户', type: 'info' },
@@ -60,9 +71,15 @@ async function load() {
     historyForm.service = member.value.history_service_count || 0;
     historyForm.referral = member.value.history_referral_count || 0;
     payments.value = (await API.paymentList(id) as any) || [];
+    await loadDailyProfile();
   } finally {
     loading.value = false;
   }
+}
+
+async function loadDailyProfile() {
+  const p: any = await API.dailyThoughtProfile(id);
+  Object.assign(dailyProfile, p || {});
 }
 
 async function loadFollowups() {
@@ -118,6 +135,27 @@ async function saveHistory() {
     ElMessage.error('保存失败');
   } finally {
     savingHistory.value = false;
+  }
+}
+
+async function saveDailyProfile() {
+  savingDailyProfile.value = true;
+  try {
+    const p: any = await API.dailyThoughtProfileSave(id, {
+      birth_date: dailyProfile.birth_date || null,
+      birth_time: dailyProfile.birth_time || null,
+      bazi_text: dailyProfile.bazi_text || null,
+      auspicious_keyword: dailyProfile.auspicious_keyword || null,
+      color_personality: dailyProfile.color_personality || null,
+      mbti: dailyProfile.mbti || null,
+      teacher_notes: dailyProfile.teacher_notes || null,
+    });
+    Object.assign(dailyProfile, p || {});
+    ElMessage.success('每日一念画像已保存');
+  } catch {
+    ElMessage.error('保存失败');
+  } finally {
+    savingDailyProfile.value = false;
   }
 }
 
@@ -300,6 +338,47 @@ onMounted(() => {
     <!-- 储值 -->
     <MemberRechargeBlock :member-id="id" style="margin-bottom: 16px;" />
 
+    <!-- 每日一念画像 -->
+    <el-card v-if="member" style="margin-bottom: 16px;">
+      <template #header>
+        <div style="display:flex;justify-content:space-between;align-items:center;">
+          <span style="font-weight:600;">🌿 每日一念画像</span>
+          <el-tag type="info" size="small">小程序展示 / 后台保存</el-tag>
+        </div>
+      </template>
+      <el-form label-width="110px">
+        <div class="daily-profile-grid">
+          <el-form-item label="出生日期">
+            <el-date-picker v-model="dailyProfile.birth_date" type="date" value-format="YYYY-MM-DD" placeholder="用户填写或老师补录" style="width:100%;" />
+          </el-form-item>
+          <el-form-item label="出生时辰">
+            <el-input v-model="dailyProfile.birth_time" placeholder="如：子时 / 23:30" />
+          </el-form-item>
+          <el-form-item label="吉祥词">
+            <el-input v-model="dailyProfile.auspicious_keyword" placeholder="可选：固定展示给客户的词" />
+          </el-form-item>
+          <el-form-item label="颜色性格">
+            <el-input v-model="dailyProfile.color_personality" placeholder="如：金色行动型 / 蓝色理性型" />
+          </el-form-item>
+          <el-form-item label="MBTI">
+            <el-input v-model="dailyProfile.mbti" placeholder="如：ENTJ / INFJ" />
+          </el-form-item>
+        </div>
+        <el-form-item label="生辰八字">
+          <el-input v-model="dailyProfile.bazi_text" placeholder="如：甲子 乙丑 丙寅 丁卯" />
+        </el-form-item>
+        <el-form-item label="老师备注">
+          <el-input v-model="dailyProfile.teacher_notes" type="textarea" :rows="3" placeholder="老师对客户性格、沟通方式、服务注意事项的补充" />
+        </el-form-item>
+        <el-form-item label="月度解读">
+          <el-input v-model="dailyProfile.monthly_fortune" type="textarea" :rows="4" readonly />
+        </el-form-item>
+        <div style="text-align:right;">
+          <el-button type="primary" @click="saveDailyProfile" :loading="savingDailyProfile">保存画像并生成月度解读</el-button>
+        </div>
+      </el-form>
+    </el-card>
+
     <!-- 🔮 会员深度分析 -->
     <MemberDeepAnalysisBlock :member-id="id" />
 
@@ -387,5 +466,15 @@ onMounted(() => {
   margin-top: 8px;
   font-size: 13px;
   color: #409eff;
+}
+.daily-profile-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 12px;
+}
+@media (max-width: 768px) {
+  .daily-profile-grid {
+    grid-template-columns: 1fr;
+  }
 }
 </style>

@@ -82,6 +82,10 @@
         <text class="list-l">会 员 权 益</text>
         <text class="list-r">{{ tierLabel }} →</text>
       </view>
+      <view class="list-row" @tap="go('/pages/daily-thought/index')">
+        <text class="list-l">每 日 一 念</text>
+        <text class="list-r gold">黄历 / 一卦 →</text>
+      </view>
       <!-- 人脸认证入口暂时隐藏（待接入国家网络身份认证后恢复）
       <view class="list-row" @tap="go('/pages/face/bind/bind')" v-if="false">
         <text class="list-l">人 脸 认 证</text>
