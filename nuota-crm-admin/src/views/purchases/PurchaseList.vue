@@ -31,6 +31,9 @@
           <el-tag :type="typeTag(row.type)" size="small">{{ typeLabel(row.type) }}</el-tag>
         </template>
       </el-table-column>
+      <el-table-column label="分公司" width="120" show-overflow-tooltip>
+        <template #default="{ row }">{{ row.branch_name || '-' }}</template>
+      </el-table-column>
       <el-table-column prop="item_name" label="物品名称" min-width="160" show-overflow-tooltip />
       <el-table-column label="数量" width="80">
         <template #default="{ row }">{{ row.quantity }}</template>
@@ -46,6 +49,9 @@
         <template #default="{ row }">
           <el-tag :type="statusTag(row.status)" size="small">{{ statusLabel(row.status) }}</el-tag>
         </template>
+      </el-table-column>
+      <el-table-column label="采购人" width="100">
+        <template #default="{ row }">{{ row.purchaser_name || '-' }}</template>
       </el-table-column>
       <el-table-column prop="reimburser" label="报销人" width="100">
         <template #default="{ row }">{{ row.reimburser || '-' }}</template>
@@ -80,6 +86,11 @@
     <!-- 新增 / 编辑弹窗 -->
     <el-dialog v-model="dialog.visible" :title="dialog.id ? '编辑采购' : '新增采购'" width="640px">
       <el-form :model="dialog.form" label-width="100px">
+        <el-form-item label="分公司" required>
+          <el-select v-model="dialog.form.branch_id" placeholder="请选择分公司" style="width:100%" filterable>
+            <el-option v-for="b in branches" :key="b.id" :value="b.id" :label="b.name" />
+          </el-select>
+        </el-form-item>
         <el-form-item label="采购类型">
           <el-select v-model="dialog.form.type" placeholder="请选择" style="width:100%">
             <el-option v-for="o in typeOpts" :key="o.value" :value="o.value" :label="o.label" />
@@ -165,6 +176,16 @@ function totalOf(row: any) {
 // ========= 列表 =========
 const rows = ref<any[]>([]);
 const loading = ref(false);
+const branches = ref<any[]>([]);
+
+async function loadBranches() {
+  try {
+    const d: any = await API.branchList();
+    branches.value = Array.isArray(d) ? d : (d?.items || []);
+  } catch {
+    branches.value = [];
+  }
+}
 const page = ref(1);
 const size = ref(20);
 const total = ref(0);
@@ -199,6 +220,7 @@ const dialog = reactive<any>({
   saving: false,
   id: 0 as number,
   form: {
+    branch_id: '' as any,
     type: 'goods',
     item_name: '',
     quantity: 1,
@@ -216,6 +238,7 @@ function openDialog(row?: any) {
   if (row) {
     dialog.id = row.id;
     dialog.form = {
+      branch_id: row.branch_id ?? '',
       type: row.type || 'goods',
       item_name: row.item_name || '',
       quantity: row.quantity || 1,
@@ -229,6 +252,7 @@ function openDialog(row?: any) {
   } else {
     dialog.id = 0;
     dialog.form = {
+      branch_id: '',
       type: 'goods',
       item_name: '',
       quantity: 1,
@@ -244,6 +268,7 @@ function openDialog(row?: any) {
 }
 
 async function save() {
+  if (!dialog.form.branch_id) { ElMessage.warning('请选择分公司'); return; }
   if (!dialog.form.item_name) { ElMessage.warning('请填物品名称'); return; }
   if (!dialog.form.quantity || dialog.form.quantity <= 0) { ElMessage.warning('数量需大于 0'); return; }
   dialog.saving = true;
@@ -284,7 +309,7 @@ async function del(row: any) {
   }
 }
 
-onMounted(load);
+onMounted(() => { loadBranches(); load(); });
 </script>
 
 <style scoped>

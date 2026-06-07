@@ -28,6 +28,12 @@ class MemberDailyProfile(Base):
     mbti = Column(String(20))
     bazi_analysis = Column(Text)  # 老师/命理师输入的专业八字测算内容
     teacher_notes = Column(Text)
+    # 塔才 Agent 生成（四色×MBTI×八字 → 评语+沟通+经营+服务）
+    taicai_comment = Column(Text)
+    taicai_communication = Column(Text)
+    taicai_business_tip = Column(Text)
+    taicai_service_tip = Column(Text)
+    taicai_generated_at = Column(DateTime)
     updated_by = Column(Integer, ForeignKey("admin_users.id"))
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())

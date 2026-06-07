@@ -76,16 +76,25 @@ class PurchaseOut(BaseModel):
     receipt_image: Optional[str]
     created_at: datetime
     created_by: Optional[int]
+    purchaser_name: Optional[str] = None
 
 
 def _enrich_branch(items, db):
-    """注入 branch_name"""
+    """注入 branch_name + purchaser_name(采购人)"""
     bids = list(set([i.branch_id for i in items if i.branch_id]))
-    if not bids:
-        return
-    bs = {b.id: b.name for b in db.query(Branch).filter(Branch.id.in_(bids)).all()}
-    for i in items:
-        i.branch_name = bs.get(i.branch_id)
+    if bids:
+        bs = {b.id: b.name for b in db.query(Branch).filter(Branch.id.in_(bids)).all()}
+        for i in items:
+            i.branch_name = bs.get(i.branch_id)
+    # 采购人（created_by → admin_users 姓名）
+    uids = list(set([i.created_by for i in items if getattr(i, "created_by", None)]))
+    if uids:
+        from models.handbook import AdminUser
+        us = {}
+        for u in db.query(AdminUser).filter(AdminUser.id.in_(uids)).all():
+            us[u.id] = getattr(u, "real_name", None) or getattr(u, "username", None)
+        for i in items:
+            i.purchaser_name = us.get(getattr(i, "created_by", None))
 
 
 @router.post("/admin/purchases", response_model=PurchaseOut)

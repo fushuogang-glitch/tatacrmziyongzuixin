@@ -129,7 +129,29 @@ def _current_month() -> str:
     return date.today().strftime("%Y-%m")
 
 
+def _parse_birth_hour(birth_time):
+    """从 birth_time(如 '10:30'/'10点'/'巳时') 提取小时数 0-23，失败返回 None"""
+    if not birth_time:
+        return None
+    import re
+    m = re.search(r"(\d{1,2})", str(birth_time))
+    if m:
+        h = int(m.group(1))
+        return h if 0 <= h <= 23 else None
+    return None
+
+
 def _generate_monthly_fortune(member: Member, profile: MemberDailyProfile, month_key: str) -> str:
+    # A方案：有生辰 → 八字引擎算月度运势
+    if profile.birth_date:
+        try:
+            from utils.bazi_engine import monthly_fortune
+            bh = _parse_birth_hour(profile.birth_time)
+            mf = monthly_fortune(profile.birth_date, month_key, bh)
+            extra = f"\uff08专业八字：{profile.bazi_analysis}\uff09" if profile.bazi_analysis else ""
+            return f"{mf['summary']} 宜：{mf['good_events']} 忌：{mf['caution']}{extra}"
+        except Exception:
+            pass
     seed = f"{member.id}:{profile.birth_date}:{profile.birth_time}:{profile.bazi_text}:{month_key}"
     theme = MONTH_THEMES[_idx(seed + ":theme", len(MONTH_THEMES))]
     word, word_tip = WORDS[_idx(seed + ":word", len(WORDS))]
@@ -170,14 +192,30 @@ def _daily_record_for(db: Session, member: Member, profile: MemberDailyProfile) 
     )
     if record:
         return record
+    # A方案：有出生日期 → 八字引擎自动排盘算当日运势（零人工）
+    if profile.birth_date:
+        try:
+            from utils.bazi_engine import daily_fortune
+            bh = _parse_birth_hour(profile.birth_time)
+            f = daily_fortune(profile.birth_date, today, bh)
+            record = DailyThoughtRecord(
+                member_id=member.id, record_date=today,
+                word=profile.auspicious_keyword or f["word"],
+                hexagram=f["hexagram"],
+                meaning=f["meaning"],
+                almanac_good=f["almanac_good"],
+                almanac_avoid=f["almanac_avoid"],
+            )
+            db.add(record); db.flush()
+            return record
+        except Exception:
+            pass
+    # 回退：未填生辰时用旧的确定性随机
     seed = f"{member.id}:{today.isoformat()}:{profile.bazi_text or ''}:{profile.birth_date or ''}"
     word, meaning = WORDS[_idx(seed + ":word", len(WORDS))]
     hexagram, hexagram_meaning = HEXAGRAMS[_idx(seed + ":hex", len(HEXAGRAMS))]
-    good_items = [GOOD[_idx(seed + f":good:{i}", len(GOOD))] for i in range(3)]
-    avoid_items = [AVOID[_idx(seed + f":avoid:{i}", len(AVOID))] for i in range(3)]
-    # 去重后保序
-    good_items = list(dict.fromkeys(good_items))
-    avoid_items = list(dict.fromkeys(avoid_items))
+    good_items = list(dict.fromkeys([GOOD[_idx(seed + f":good:{i}", len(GOOD))] for i in range(3)]))
+    avoid_items = list(dict.fromkeys([AVOID[_idx(seed + f":avoid:{i}", len(AVOID))] for i in range(3)]))
     record = DailyThoughtRecord(
         member_id=member.id,
         record_date=today,
@@ -390,6 +428,36 @@ def _matching_report(db: Session, member: Member, profile: MemberDailyProfile) -
     }
 
 
+
+def _lingguang(member, profile):
+    """灵光一点：今日金句(每人每天随机不重样) + 幸运色(有生辰用八字,否则随机)"""
+    from utils.bazi_engine import DAILY_QUOTES, WUXING_COLOR, daily_fortune
+    today = date.today()
+    # 金句：member.id 与 日期序 双因子打散，保证每人每天不同、跨天不同
+    qseed = member.id * 100003 + today.toordinal() * 131
+    quote = DAILY_QUOTES[qseed % len(DAILY_QUOTES)]
+    # 幸运色
+    lucky_name, lucky_hex = None, None
+    if profile and profile.birth_date:
+        try:
+            bh = None
+            if profile.birth_time:
+                import re
+                m = re.search(r"(\\d{1,2})", str(profile.birth_time))
+                if m:
+                    h = int(m.group(1)); bh = h if 0 <= h <= 23 else None
+            f = daily_fortune(profile.birth_date, today, bh)
+            lucky_name, lucky_hex = f["lucky_color"], f["lucky_color_hex"]
+        except Exception:
+            pass
+    if not lucky_name:
+        colors = list(WUXING_COLOR.values())
+        c = colors[(qseed // 7) % len(colors)]
+        lucky_name, lucky_hex = c["name"], c["hex"]
+    return {"quote": quote, "lucky_color": lucky_name,
+            "lucky_color_hex": lucky_hex, "watermark": "TATA"}
+
+
 @api_router.get("/today")
 def today_thought(current: Member = Depends(get_current_member), db: Session = Depends(get_db)):
     profile = _profile_for(db, current.id)
@@ -411,6 +479,7 @@ def today_thought(current: Member = Depends(get_current_member), db: Session = D
         "profile": _profile_out(profile),
         "monthly_fortune": profile.monthly_fortune,
         "monthly_simple": _monthly_simple(current, profile),
+        "lingguang": _lingguang(current, profile),
         "disclaimer": "每日一念仅作文化娱乐与经营启发参考。",
     })
 
@@ -456,6 +525,19 @@ def admin_save_profile(
     profile.updated_by = getattr(current, "id", None)
     profile.monthly_fortune_month = _current_month()
     profile.monthly_fortune = _generate_monthly_fortune(member, profile, profile.monthly_fortune_month)
+    # 塔才自动生成评语：老师填了 MBTI 或 颜色性格 → 生成四块指导
+    if profile.color_personality or profile.mbti:
+        try:
+            from utils.taicai_engine import generate as _taicai_gen
+            from datetime import datetime as _dt
+            r = _taicai_gen(profile.color_personality, profile.mbti, profile.bazi_analysis, member.name or "该客户")
+            profile.taicai_comment = r["comment"]
+            profile.taicai_communication = r["communication"]
+            profile.taicai_business_tip = r["business_tip"]
+            profile.taicai_service_tip = r["service_tip"]
+            profile.taicai_generated_at = _dt.utcnow()
+        except Exception:
+            pass
     db.commit()
     db.refresh(profile)
     return ok(_admin_profile_out(db, member, profile), "每日一念资料已保存")

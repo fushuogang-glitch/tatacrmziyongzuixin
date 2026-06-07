@@ -35,7 +35,17 @@ const dailyProfile = reactive<any>({
   teacher_notes: '',
   monthly_fortune: '',
   matching_report: {},
+  taicai_comment: '',
+  taicai_communication: '',
+  taicai_business_tip: '',
+  taicai_service_tip: '',
+  taicai_generated_at: '',
 });
+
+const hasTaicai = computed(() =>
+  !!(dailyProfile.taicai_comment || dailyProfile.taicai_communication ||
+     dailyProfile.taicai_business_tip || dailyProfile.taicai_service_tip)
+);
 
 const PROFILE_TYPE_OPTS = [
   { value: 'customer', label: '客户' },
@@ -169,6 +179,8 @@ async function saveDailyProfile() {
       teacher_notes: dailyProfile.teacher_notes || null,
     });
     Object.assign(dailyProfile, p || {});
+    // 重新拉取 profile，刷新后端自动生成的塔才评语
+    await loadDailyProfile();
     ElMessage.success('每日一念画像已保存');
   } catch {
     ElMessage.error('保存失败');
@@ -491,6 +503,38 @@ onMounted(() => {
       </div>
     </el-card>
 
+    <!-- 🔮 塔才智能评语 -->
+    <el-card v-if="member" class="taicai-card" style="margin-bottom: 16px;">
+      <template #header>
+        <div style="display:flex;justify-content:space-between;align-items:center;">
+          <span style="font-weight:600;color:#7c3aed;">🔮 塔才智能评语</span>
+          <el-tag v-if="dailyProfile.taicai_generated_at" type="" size="small" effect="plain" style="color:#7c3aed;border-color:#ddd6fe;">
+            生成于 {{ fmt(dailyProfile.taicai_generated_at) }}
+          </el-tag>
+        </div>
+      </template>
+
+      <div v-if="hasTaicai" class="taicai-grid">
+        <div class="taicai-block">
+          <div class="taicai-title">性格评语</div>
+          <div class="taicai-body">{{ dailyProfile.taicai_comment || '—' }}</div>
+        </div>
+        <div class="taicai-block">
+          <div class="taicai-title">沟通注意事项</div>
+          <div class="taicai-body">{{ dailyProfile.taicai_communication || '—' }}</div>
+        </div>
+        <div class="taicai-block">
+          <div class="taicai-title">经营销售提醒</div>
+          <div class="taicai-body">{{ dailyProfile.taicai_business_tip || '—' }}</div>
+        </div>
+        <div class="taicai-block">
+          <div class="taicai-title">服务接待建议</div>
+          <div class="taicai-body">{{ dailyProfile.taicai_service_tip || '—' }}</div>
+        </div>
+      </div>
+      <el-empty v-else description="填写MBTI和颜色性格并保存后，塔才将自动生成评语" :image-size="60" />
+    </el-card>
+
     <!-- 🔮 会员深度分析 -->
     <MemberDeepAnalysisBlock :member-id="id" />
 
@@ -645,5 +689,38 @@ onMounted(() => {
   .match-columns {
     grid-template-columns: 1fr;
   }
+  .taicai-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.taicai-card {
+  border: 1px solid #ede9fe;
+  background: linear-gradient(180deg, #faf9ff 0%, #ffffff 60%);
+}
+.taicai-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+.taicai-block {
+  background: #fff;
+  border: 1px solid #ede9fe;
+  border-radius: 12px;
+  padding: 14px 16px;
+}
+.taicai-title {
+  font-weight: 700;
+  font-size: 14px;
+  color: #7c3aed;
+  margin-bottom: 8px;
+  padding-left: 8px;
+  border-left: 3px solid #7c3aed;
+}
+.taicai-body {
+  color: #374151;
+  font-size: 13px;
+  line-height: 1.75;
+  white-space: pre-wrap;
 }
 </style>

@@ -6,12 +6,43 @@
       <view class="brand-tag">塔 塔 咨 询 · 新 美 业 战 略 伙 伴</view>
     </view>
 
+    <!-- 灵光一点：首页浮现金句卡（淡入·TATA水印·可分享） -->
+    <view v-if="lingguang.quote && showLingguang" class="lingguang-mask" @tap="showLingguang=false">
+      <view class="lingguang-card" :style="{ background: lgBg }" @tap.stop="">
+        <text class="lg-eyebrow">灵 光 一 点</text>
+        <text class="lg-quote">{{ lingguang.quote }}</text>
+        <view class="lg-divider"></view>
+        <view class="lg-foot">
+          <text class="lg-color" v-if="lingguang.lucky_color">今日宜 · {{ lingguang.lucky_color }}</text>
+          <text class="lg-mark">{{ lingguang.watermark || 'TATA' }}</text>
+        </view>
+        <view class="lg-actions">
+          <button class="lg-btn" open-type="share">分享</button>
+          <text class="lg-close" @tap="showLingguang=false">轻触收起</text>
+        </view>
+      </view>
+    </view>
+
     <scroll-view scroll-y class="scroll">
-      <view class="daily-card" @tap="go('/pages/daily-thought/index')" v-if="daily.word">
-        <view>
+      <!-- 每日一念·智能入口：未填生辰→引导卡；已填→当日展示 -->
+      <!-- 态一：未填生辰·引导开启（带说明） -->
+      <view class="dy-intro" v-if="daily.profile && !daily.profile.birth_date" @tap="go('/pages/daily-thought/index')">
+        <view class="dy-intro-deco"></view>
+        <text class="dy-intro-eyebrow">每 日 一 念</text>
+        <text class="dy-intro-title">✨ 开启你的专属每日一念</text>
+        <text class="dy-intro-desc">留下生辰，每天为你测算专属运势、今日幸运色与一念箴言，助你顺势而为。</text>
+        <view class="dy-intro-btn">立 即 开 启 →</view>
+      </view>
+
+      <!-- 态二：已填生辰·当日每日一念 -->
+      <view class="daily-card" @tap="go('/pages/daily-thought/index')" v-else-if="daily.word">
+        <view class="daily-main">
           <text class="daily-label">每日一念 · {{ daily.date }}</text>
           <text class="daily-word">{{ daily.word }}</text>
-          <text class="daily-meaning">{{ daily.meaning }}</text>
+          <text class="daily-meaning">{{ (lingguang && lingguang.quote) || daily.meaning }}</text>
+          <view class="daily-tags" v-if="lingguang && lingguang.lucky_color">
+            <text class="daily-tag">今日宜 · {{ lingguang.lucky_color }}</text>
+          </view>
         </view>
         <text class="daily-arr">→</text>
       </view>
@@ -134,6 +165,14 @@ const newsItems = ref<any[]>([]);
 const cultureItems = ref<any[]>([]);
 const videoItems = ref<any[]>([]);
 const daily = ref<any>({});
+const lingguang = ref<any>({});
+const showLingguang = ref(false);
+
+// 灵光卡背景：今日幸运色淡雅渐变（低饱和·不抢字）
+const lgBg = computed(() => {
+  const hex = lingguang.value.lucky_color_hex || '#c9a96e';
+  return `linear-gradient(155deg, #fbf8f1 0%, ${hex}22 55%, ${hex}38 100%)`;
+});
 
 // 按当前Tab过滤
 const filteredList = computed(() => {
@@ -187,11 +226,31 @@ async function loadArticles() {
 
 async function loadDaily() {
   try {
-    daily.value = await api.dailyThought();
+    const d: any = await api.dailyThought();
+    daily.value = d || {};
+    if (d?.lingguang?.quote) {
+      lingguang.value = d.lingguang;
+      // 每日一次：同一天只浮现一次，不打扰
+      const today = d.date || '';
+      const seen = uni.getStorageSync('lg_seen_date');
+      if (seen !== today) {
+        showLingguang.value = true;
+        uni.setStorageSync('lg_seen_date', today);
+      }
+    }
   } catch (e) {
     daily.value = {};
   }
 }
+
+// 分享转发（友圈/好友）携带金句
+function onShareAppMessage() {
+  return {
+    title: lingguang.value.quote || '灵光一点 · TATA',
+    path: '/pages/tata/index',
+  };
+}
+defineExpose({ onShareAppMessage });
 
 function onArticleTap(ev: any) {
   if (!ev.id) return;
@@ -239,6 +298,158 @@ onMounted(async () => {
 .brand-head {
   padding: 60rpx 56rpx 32rpx;
   border-bottom: 1rpx solid #ebe8e2;
+}
+/* 灵光一点·浮现卡 */
+.lingguang-mask {
+  position: fixed;
+  left: 0; top: 0; right: 0; bottom: 0;
+  background: rgba(20, 16, 10, 0.45);
+  z-index: 999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: lg-fade 0.5s ease;
+}
+@keyframes lg-fade { from { opacity: 0; } to { opacity: 1; } }
+.lingguang-card {
+  width: 600rpx;
+  border-radius: 36rpx;
+  padding: 70rpx 56rpx 48rpx;
+  box-shadow: 0 30rpx 80rpx rgba(40, 30, 15, 0.28);
+  animation: lg-rise 0.7s cubic-bezier(.2,.8,.2,1);
+  position: relative;
+  overflow: hidden;
+}
+@keyframes lg-rise {
+  from { opacity: 0; transform: translateY(40rpx) scale(0.94); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+.lg-eyebrow {
+  display: block;
+  text-align: center;
+  font-size: 24rpx;
+  letter-spacing: 14rpx;
+  color: #b08a4e;
+  margin-bottom: 44rpx;
+}
+.lg-quote {
+  display: block;
+  text-align: center;
+  font-size: 50rpx;
+  line-height: 1.7;
+  letter-spacing: 6rpx;
+  color: #2a2218;
+  font-family: "Noto Serif SC", "Songti SC", serif;
+  font-weight: 500;
+}
+.lg-divider {
+  width: 56rpx;
+  height: 2rpx;
+  background: #c9a96e;
+  margin: 44rpx auto 28rpx;
+}
+.lg-foot {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0 6rpx;
+}
+.lg-color {
+  font-size: 22rpx;
+  color: #8a7a5c;
+  letter-spacing: 2rpx;
+}
+.lg-mark {
+  font-size: 24rpx;
+  letter-spacing: 4rpx;
+  color: #c9a96e;
+  font-weight: 600;
+  font-style: italic;
+}
+.lg-actions {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 32rpx;
+  margin-top: 40rpx;
+}
+.lg-btn {
+  background: #2a2218;
+  color: #e8cf9a;
+  font-size: 26rpx;
+  letter-spacing: 6rpx;
+  border-radius: 40rpx;
+  padding: 4rpx 0;
+  width: 200rpx;
+  line-height: 2.6;
+  margin: 0;
+}
+.lg-btn::after { border: none; }
+.lg-close {
+  font-size: 22rpx;
+  color: #a89878;
+  letter-spacing: 2rpx;
+}
+
+/* 每日一念·引导态 */
+.dy-intro {
+  margin: 28rpx 28rpx 8rpx;
+  padding: 40rpx 36rpx 36rpx;
+  border-radius: 28rpx;
+  background: linear-gradient(140deg, #211c16 0%, #4c3922 60%, #6b4f2a 100%);
+  position: relative;
+  overflow: hidden;
+}
+.dy-intro-deco {
+  position: absolute;
+  right: -50rpx; top: -50rpx;
+  width: 200rpx; height: 200rpx;
+  border-radius: 50%;
+  background: rgba(201,169,110,.12);
+}
+.dy-intro-eyebrow {
+  display: block;
+  font-size: 22rpx;
+  letter-spacing: 12rpx;
+  color: #c9a96e;
+  margin-bottom: 18rpx;
+}
+.dy-intro-title {
+  display: block;
+  font-size: 36rpx;
+  color: #fff;
+  letter-spacing: 2rpx;
+  font-weight: 500;
+  margin-bottom: 16rpx;
+}
+.dy-intro-desc {
+  display: block;
+  font-size: 24rpx;
+  line-height: 1.7;
+  color: rgba(255,255,255,.7);
+  letter-spacing: 1rpx;
+  margin-bottom: 28rpx;
+}
+.dy-intro-btn {
+  display: inline-block;
+  background: #c9a96e;
+  color: #211c16;
+  font-size: 26rpx;
+  letter-spacing: 6rpx;
+  padding: 14rpx 40rpx;
+  border-radius: 40rpx;
+  font-weight: 600;
+}
+.daily-main { flex: 1; }
+.daily-tags { margin-top: 14rpx; }
+.daily-tag {
+  display: inline-block;
+  font-size: 20rpx;
+  color: #c9a96e;
+  border: 1rpx solid rgba(201,169,110,.4);
+  padding: 4rpx 16rpx;
+  border-radius: 20rpx;
+  letter-spacing: 2rpx;
 }
 .daily-card {
   margin: 28rpx 28rpx 8rpx;

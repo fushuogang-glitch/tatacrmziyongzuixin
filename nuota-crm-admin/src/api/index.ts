@@ -225,4 +225,17 @@ export const API = {
     http.get(`/admin/consultants/${consultantId}/talent-analysis`),
   consultantTalentAnalysisSubmit: (consultantId: number, body: { raw_text: string; raw_images?: string[] }) =>
     http.post(`/admin/consultants/${consultantId}/talent-analysis`, body),
+
+  // 财务管理 v2.2
+  financeOverview: (month: string) => http.get('/admin/finance/overview', { params: { month } }),
+  financeBranchMonthly: (bid: number, month: string) => http.get(`/admin/finance/branch/${bid}/monthly`, { params: { month } }),
+  financeBreakeven: (bid: number, month: string) => http.get(`/admin/finance/branch/${bid}/breakeven`, { params: { month } }),
+  financeBreakevenConfig: (bid: number) => http.get(`/admin/finance/branch/${bid}/breakeven-config`),
+  financeBreakevenConfigSet: (bid: number, body: any) => http.put(`/admin/finance/branch/${bid}/breakeven-config`, body),
+  financeIncomeDetail: (params: any) => http.get('/admin/finance/income-detail', { params }),
+  financeExpenseDetail: (params: any) => http.get('/admin/finance/expense-detail', { params }),
+  financeFixedCosts: (params?: any) => http.get('/admin/finance/fixed-costs', { params: params || {} }),
+  financeFixedCostCreate: (body: any) => http.post('/admin/finance/fixed-costs', body),
+  financeFixedCostUpdate: (id: number, body: any) => http.put(`/admin/finance/fixed-costs/${id}`, body),
+  financeFixedCostDelete: (id: number) => http.delete(`/admin/finance/fixed-costs/${id}`),
 };

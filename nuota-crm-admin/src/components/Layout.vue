@@ -32,9 +32,14 @@ const menuGroups = [
     ],
   },
   {
-    label: '采购管理', icon: 'Box',
+    label: '财务管理', icon: 'Money',
     items: [
+      { path: '/finance', title: '财务总览', icon: 'TrendCharts', adminOnly: true },
       { path: '/purchases', title: '采购管理', icon: 'Box', adminOnly: true },
+      { path: '/finance/income', title: '收费明细', icon: 'Money', adminOnly: true },
+      { path: '/finance/fixed-costs', title: '固定成本', icon: 'House', adminOnly: true },
+      { path: '/finance/breakeven', title: '盈亏平衡核算', icon: 'DataAnalysis', adminOnly: true },
+      { path: '/finance/statement', title: '月度核算表', icon: 'Document', adminOnly: true },
     ],
   },
   {
@@ -42,7 +47,6 @@ const menuGroups = [
     items: [
       { path: '/customers', title: '客户管理', icon: 'OfficeBuilding' },
       { path: '/members', title: '会员/学员', icon: 'User' },
-      { path: '/payments', title: '收款明细', icon: 'Money' },
       { path: '/referrals', title: '推荐管理', icon: 'Share', adminOnly: true },
       { path: '/rewards', title: '权益台账', icon: 'Present', adminOnly: true },
     ],
@@ -76,8 +80,8 @@ const menuGroups = [
   {
     label: '系统设置', icon: 'Setting',
     items: [
-      { path: '/users', title: '账号管理', icon: 'Setting', superOnly: true },
-      { path: '/operation-logs', title: '操作日志', icon: 'Document', superOnly: true },
+      { path: '/users', title: '账号管理', icon: 'Setting', adminOnly: true },
+      { path: '/operation-logs', title: '操作日志', icon: 'Document', adminOnly: true },
       { path: '/recycle-bin', title: '回收站', icon: 'Delete', superOnly: true },
     ],
   },

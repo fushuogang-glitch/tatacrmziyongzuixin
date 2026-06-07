@@ -29,6 +29,7 @@ from routers.bookings import (
 from routers.handbooks import router as handbooks_router, admin_router as handbooks_admin_router
 from routers.admin import router as admin_router
 from routers.customers import router as customers_router
+from routers.finance import router as finance_router
 from routers.services import router as services_router, admin_router as services_admin_router
 from routers.agreements import router as agreements_router
 from routers.calendar import router as calendar_router, public_router as calendar_public_router
@@ -280,6 +281,7 @@ app.include_router(handbooks_admin_router)
 app.include_router(services_admin_router)
 app.include_router(admin_router)
 app.include_router(customers_router)
+app.include_router(finance_router)
 app.include_router(calendar_router)
 app.include_router(calendar_public_router)
 app.include_router(consultant_auth_router)

@@ -17,6 +17,7 @@ from models.course_session import CourseSession, CourseEnrollment as CourseEnrol
 from models.agent import AgentApiKey
 from models.webhook_event import WebhookEvent
 from models.purchase import Purchase
+from models.finance import BranchFixedCost, BranchBreakevenConfig
 from models.recharge import Recharge, RechargeConsumption
 from models.deep_analysis import MemberDeepAnalysis, ConsultantTalentAnalysis
 from models.daily_thought import MemberDailyProfile, DailyThoughtRecord
